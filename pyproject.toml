@@ -1,0 +1,66 @@
+[project]
+name = "always-best-estimates"
+version = "0.1.0"
+description = "Local, single-user, always-on portfolio engine: ingest -> features -> world-model forecast -> Black-Litterman blend -> constrained optimization."
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pyportfolioopt==1.6.0",
+    "cvxpy>=1.5",
+    "yfinance>=1.5",
+    "fredapi>=0.5.2",
+    "torch>=2.2",
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "scikit-learn>=1.4",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["backend/abe"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["abe"]
+
+[tool.mypy]
+python_version = "3.12"
+mypy_path = "backend"
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = [
+    "pypfopt.*",
+    "cvxpy.*",
+    "yfinance.*",
+    "fredapi.*",
+    "scipy.*",
+    "sklearn.*",
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "smoke: 60s real end-to-end smoke gate (no mocks; used from Step 9 on)",
+]

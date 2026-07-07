@@ -19,5 +19,8 @@ __pycache__/
 node_modules/
 frontend/dist/
 
+# UI review artifacts
+.ui-review-evidence/
+
 # plan-expedite resume state
-.plan-expedite-state
+.plan-expedite-state*

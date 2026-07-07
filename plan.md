@@ -287,6 +287,7 @@ into Automated + Manual subsections.
 - **Produces:** project skeleton, `constants.py`, `vite.config.ts` (port 5174, strictPort, host 127.0.0.1, `/api` proxy), registry entry in `dev/.claude/observatory/registry.toml`
 - **Done when:** `uv run pytest` green on scaffold tests; `uvicorn` serves `/health` 200; the Vite stub renders on 127.0.0.1:5174; `uv run --project dev-observatory observatory status` lists `always-best-estimates`; `observatory ports` shows 8140/5174 with no collision.
 - **Depends on:** none
+- **Status:** DONE (2026-07-07)
 
 ### Step 2: SQLite storage module
 - **Problem:** `storage.py` — connection + PRAGMAs (WAL/synchronous=NORMAL/busy_timeout/foreign_keys), full schema DDL (§3), the numpy/torch scalar coercion insert boundary, one-writer connection.
