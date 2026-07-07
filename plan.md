@@ -297,6 +297,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/storage.py`, schema migration, `data/` dir handling
 - **Done when:** schema creates from scratch; `journal_mode=WAL` asserted; a round-trip test writes a real `np.float64` and a `torch.Tensor` scalar and reads back Python `float`; foreign-key violation test rejects an orphan `run_stages` row.
 - **Depends on:** 1
+- **Status:** DONE (2026-07-07)
 
 ### Step 3: Price ingest — yfinance adapter + cache
 - **Problem:** `SourceAdapter` protocol; `YFinanceAdapter` (`auto_adjust=True, multi_level_index=False, progress=False` + column-set assertion before write); `CacheAdapter`; incremental upsert (missing dates only, 429 backoff); backfill entrypoint.
