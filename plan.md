@@ -282,7 +282,7 @@ into Automated + Manual subsections.
 ### Step 1: Scaffold + constants + observatory registration
 - **Problem:** Create the uv project (FastAPI `/health`, React+Vite stub, `pyproject.toml` with all pinned deps), `.gitignore` (`.env`, `data/`, `*.db*`, `node_modules/`), `.env.example`, `backend/abe/constants.py` (the one-source-of-truth values), and register the owned project with dev-observatory.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #2
 - **Flags:** --reviewers code
 - **Produces:** project skeleton, `constants.py`, `vite.config.ts` (port 5174, strictPort, host 127.0.0.1, `/api` proxy), registry entry in `dev/.claude/observatory/registry.toml`
 - **Done when:** `uv run pytest` green on scaffold tests; `uvicorn` serves `/health` 200; the Vite stub renders on 127.0.0.1:5174; `uv run --project dev-observatory observatory status` lists `always-best-estimates`; `observatory ports` shows 8140/5174 with no collision.
@@ -291,7 +291,7 @@ into Automated + Manual subsections.
 ### Step 2: SQLite storage module
 - **Problem:** `storage.py` — connection + PRAGMAs (WAL/synchronous=NORMAL/busy_timeout/foreign_keys), full schema DDL (§3), the numpy/torch scalar coercion insert boundary, one-writer connection.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #3
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/storage.py`, schema migration, `data/` dir handling
 - **Done when:** schema creates from scratch; `journal_mode=WAL` asserted; a round-trip test writes a real `np.float64` and a `torch.Tensor` scalar and reads back Python `float`; foreign-key violation test rejects an orphan `run_stages` row.
@@ -300,7 +300,7 @@ into Automated + Manual subsections.
 ### Step 3: Price ingest — yfinance adapter + cache
 - **Problem:** `SourceAdapter` protocol; `YFinanceAdapter` (`auto_adjust=True, multi_level_index=False, progress=False` + column-set assertion before write); `CacheAdapter`; incremental upsert (missing dates only, 429 backoff); backfill entrypoint.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #4
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/ingest/{sources,prices}.py`, `scripts` backfill hook
 - **Done when:** backfill loads SPY/ACWI/AGG adjusted daily closes; a second run is a no-op (idempotency test); a network-off test serves full history from cache; a test asserts AGG trailing-10y annualized mean return > 1% (guards the price-only-vs-total-return bond bug).
@@ -309,7 +309,7 @@ into Automated + Manual subsections.
 ### Step 4: FRED macro ingest (daily set)
 - **Problem:** `macro.py` — fredapi adapter for the daily set (DGS10, T10Y2Y, VIXCLS, DFF, BAMLH0A0HYM2, DTWEXBGS); startup key-probe (missing/invalid key → explicit degraded mode with a stable error code, never silent-empty); parse `'.'/''` → NaN; store `(series_id, obs_date, value, available_date, ingested_at)` append-only with per-series release-lag shift.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #5
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/ingest/macro.py`, `FRED_RELEASE_LAG` usage
 - **Done when:** the 6 daily series fetch and store; `available_date = obs_date + declared lag` asserted; a missing-key test starts the app in macro-disabled degraded mode with the stable code; empty-string FRED values parse as NaN (test).
@@ -318,7 +318,7 @@ into Automated + Manual subsections.
 ### Step 5: WorldModel interface + EWMA baseline
 - **Problem:** `model/base.py` — the `WorldModel` Protocol `forecast(features) → {asset: (mu_H, sigma_H)}` over H=21, and `EWMABaseline` (μ = EWMA of returns; σ = trailing forecast-error std, a genuine positive uncertainty). Freeze the interface with a contract test every implementation must pass.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #6
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/model/base.py`, `backend/abe/features/basic.py`
 - **Done when:** EWMA emits `(mu, sigma)` per asset with σ>0; the contract test asserts shape, horizon, and non-degenerate σ; μ/σ are per-horizon (H-day) returns.
@@ -327,7 +327,7 @@ into Automated + Manual subsections.
 ### Step 6: Blend module — covariance + confidence + Black-Litterman
 - **Problem:** `blend/covariance.py` (Ledoit-Wolf as the only Σ path, annualized), `blend/confidence.py` (σ → Idzorek confidence `c = clamp(|2Φ(μ/σ)−1|, 0.02, 0.95)`, leaf module), `blend/black_litterman.py` (`bl_blend` pure fn: π = δ·Σ·w_mkt with `risk_free_rate=0.0`; `BlackLittermanModel(omega='idzorek', view_confidences, tau=0.05)`; ONE ordered `View` list → P/Q/confidences; diagnostics).
 - **Type:** code
-- **Issue:** #
+- **Issue:** #7
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/blend/{covariance,confidence,black_litterman}.py`
 - **Done when:** confidence boundary tests (σ→0 ⇒ c clamps to 0.95, σ large ⇒ c→~0.02); LW returns PSD; annualized SPY vol lands in 0.05–0.60 (units test); a golden-value test reproduces an Idzorek-paper Table-6/7 example within tolerance; `pyportfolioopt==1.6.0` import smoke test.
@@ -336,7 +336,7 @@ into Automated + Manual subsections.
 ### Step 7: cvxpy mean-variance-utility optimizer
 - **Problem:** `optimize/mvu.py` — `maximize(mu@w − 0.5·δ·sum_squares(chol.T@w) − γ_tc·norm1(w − w_prev))` s.t. `sum(w)==1, 0≤w≤W_MAX`; `chol = cholesky(annualized Σ_post)`; solver `CLARABEL`; require status ∈ {OPTIMAL, OPTIMAL_INACCURATE}; clip `w<1e-8→0` + renormalize; cold-start drops turnover; INFEASIBLE retries without turnover and flags `relaxed_turnover`.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #8
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/optimize/mvu.py`
 - **Done when:** weights sum to 1 with all constraints test-asserted; cold-start (no `w_prev`) test passes; a deliberately near-singular Σ flows through without crashing; a ±10bp μ-perturbation moves max weight below a declared bound (stability test).
@@ -345,7 +345,7 @@ into Automated + Manual subsections.
 ### Step 8: Pipeline orchestrator + JSON API + run ledger
 - **Problem:** `pipeline.py` (sync `run_pipeline(force)` wiring freshness-gate → ingest(cache) → features → WorldModel → blend → optimize → persist, each writing a `run_stages` row) and `api.py` (routes in §6, reads via short-lived read-only connections).
 - **Type:** code
-- **Issue:** #
+- **Issue:** #9
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/{pipeline,api}.py`
 - **Done when:** an integration test drives `POST /api/runs/trigger` end-to-end **through the production FastAPI route** (TestClient with lifespan) and asserts rows land in `runs`, `run_stages`, and `target_weights` with weights summing to 1; `/api/runs/latest` returns the run + stages.
@@ -354,7 +354,7 @@ into Automated + Manual subsections.
 ### Step 9: Smoke gate — one real end-to-end cycle
 - **Problem:** `scripts/smoke.py` — a ~60-second real end-to-end run with NO mocks: boot the app, trigger one real run against cached data, assert no exception, all `run_stages` `status='ok'`, and `target_weights` persisted. Surfaces producer/consumer drift that mocked unit tests miss.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #10
 - **Flags:** --reviewers code
 - **Produces:** `scripts/smoke.py`, a `pytest` smoke marker
 - **Done when:** the smoke script exits 0; every stage card is `ok`; weights sum to 1. (Business-logic quality is out of scope — this gate only proves the pipeline completes one real cycle without crashing.)
@@ -363,7 +363,7 @@ into Automated + Manual subsections.
 ### Step 10: React UI — one card per stage
 - **Problem:** React cards for each pipeline stage (latest prices, features, per-asset forecast, BL posterior, final weights) reading `run_stages`; a refresh button (`POST /api/runs/trigger`); `error`/`skipped` first-class card states; a header showing "last successful run: <age>". The optimizer card states the SPY/ACWI overlap caveat.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #11
 - **Flags:** --reviewers full --isolation worktree --start-cmd "uv run uvicorn abe.api:app --host 127.0.0.1 --port 8140" --url http://127.0.0.1:8140 --ui
 - **Produces:** `frontend/src/**`
 - **Done when:** the UI renders all stage cards from a live run; the refresh button triggers a run and the cards update; error/skipped states render (not blank); runtime reviewers pass (no auth gate — the URL is open).
@@ -372,7 +372,7 @@ into Automated + Manual subsections.
 ### Step 11: Scheduler + degraded modes + error resilience
 - **Problem:** `scheduler.py` — asyncio lifespan task: fixed-delay loop (`wait_for(event, timeout=300)`) + on-demand trigger + `asyncio.Lock` single-flight; pipeline body via `ThreadPoolExecutor(max_workers=1)`; stage-0 freshness gate (skip on unchanged); separate daily-fetch vs 5-min-recompute paths; per-iteration try/except → `status='error'` row + loop restart; `wal_checkpoint(TRUNCATE)` after each run.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #12
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/scheduler.py`, lifespan wiring in `api.py`
 - **Done when:** an unchanged-data test writes `status='skipped'`; a raising-stage test writes an `error` row AND the next scheduled run still fires; the trigger endpoint coalesces during an active run; a `force=true` trigger bypasses the freshness gate.
@@ -381,7 +381,7 @@ into Automated + Manual subsections.
 ### Step 12: Feature layer — frac-diff + purged CV + macro join
 - **Problem:** `afml/fracdiff.py` (fixed-width FFD on log-prices; min-d ADF grid search on TRAINING folds only; persist frozen `{d, tau, window_len, adf_p, corr}`), `afml/purged_cv.py` (purged + embargoed ≥H splits), `features/build.py` (returns/vol + frac-diff + FRED `merge_asof` backward on `available_date`; deterministic matrix). In-project, against current pandas/sklearn.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #13
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/afml/{fracdiff,purged_cv}.py`, `backend/abe/features/build.py`
 - **Done when:** feature regeneration is hash-stable (deterministic); a no-lookahead test (feature at t uses only data available at t); ADF confirms FFD stationarity; a leakage test asserts no train label-interval overlaps any test interval; garbage anchors (white-noise → d≈0, random-walk → d≈1).
@@ -390,7 +390,7 @@ into Automated + Manual subsections.
 ### Step 13: Minimal JEPA behind a toggle
 - **Problem:** `model/jepa.py` (context encoder + EMA target encoder + predictor + VICReg anti-collapse + return head + ensemble σ, <100–500k params), `model/train.py` (offline training → checkpoint), an EWMA↔JEPA config toggle wiring `JEPAModel` through the `WorldModel` interface, and collapse instrumentation (per-dim embedding std, effective rank, hard-fail threshold).
 - **Type:** code
-- **Issue:** #
+- **Issue:** #14
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/model/{jepa,train}.py`, checkpoint loader
 - **Done when:** training produces a checkpoint; the no-collapse check passes; a shuffled-target control run scores measurably worse than the real run (asserted in CI); the toggle routes `JEPAModel` through the production interface; DEFAULT stays EWMA.
@@ -399,7 +399,7 @@ into Automated + Manual subsections.
 ### Step 14: JEPA walk-forward evaluation gate
 - **Problem:** `eval/walk_forward.py` — a pre-registered purged walk-forward eval of `(μ, σ)` produced **through the production `WorldModel` interface**, JEPA vs EWMA on identical windows (forecast MSE/IC + σ calibration coverage); writes a committed eval report and records the promotion decision.
 - **Type:** code
-- **Issue:** #
+- **Issue:** #15
 - **Flags:** --reviewers code
 - **Produces:** `backend/abe/eval/walk_forward.py`, `docs/eval/jepa-vs-ewma-<date>.md`
 - **Done when:** the eval report exists comparing JEPA vs EWMA on identical purged walk-forward windows; calibration coverage is computed; the report records "EWMA remains default unless JEPA wins" with the measured numbers.
@@ -408,7 +408,7 @@ into Automated + Manual subsections.
 ### Step 15: Soak test
 - **Problem:** Run the full always-on engine for a target duration (≥4 hours) against cached + live-daily data; capture findings (run cadence, skipped-vs-real distribution, memory, any error rows, laptop-sleep gap handling).
 - **Type:** wait
-- **Issue:** #
+- **Issue:** #16
 - **Produces:** `docs/soak/soak-<date>.md` findings log
 - **Done when:** the engine runs ≥4h; the run ledger shows periodic runs with `skipped` vs real correctly marked; no unhandled crash; findings captured. (Resume in a fresh session via `--resume 16` after the wait.)
 - **Depends on:** 11
@@ -418,7 +418,7 @@ into Automated + Manual subsections.
 
 ### Step M1: UI acceptance walkthrough
 - **Source step:** Steps 10, 11 (§ Build Steps)
-- **Issue:** #
+- **Issue:** #17
 - **Commands:**
   ```powershell
   npm run build --prefix frontend
@@ -435,7 +435,7 @@ into Automated + Manual subsections.
 
 ### Step M2: Degraded-mode check
 - **Source step:** Steps 3, 4, 11 (§ Build Steps)
-- **Issue:** #
+- **Issue:** #18
 - **Commands:**
   ```powershell
   # (a) no macro key
