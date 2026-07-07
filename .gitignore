@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Data / SQLite
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+
+# plan-expedite resume state
+.plan-expedite-state
