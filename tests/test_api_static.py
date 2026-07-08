@@ -37,7 +37,9 @@ def test_dist_present_serves_index_and_api_routes_win(tmp_path: Path) -> None:
         assert client.get("/health").json() == {"status": "ok"}
         latest = client.get("/api/runs/latest")
         assert latest.status_code == 404
-        assert "detail" in latest.json()  # the JSON API 404, not a static 404
+        # Route-specific message uniquely proves the API handler executed
+        # (a static-mount 404 would be a generic {"detail": "Not Found"}).
+        assert latest.json()["detail"] == "no successful run yet"
 
 
 def test_dist_absent_root_404_while_api_works(tmp_path: Path) -> None:
@@ -51,3 +53,7 @@ def test_default_dist_path_points_at_frontend_dist() -> None:
     assert FRONTEND_DIST.parts[-2:] == ("frontend", "dist")
     # Repo-root anchoring: the resolved parent must contain backend/abe.
     assert (FRONTEND_DIST.parent.parent / "backend" / "abe" / "api.py").is_file()
+    # `is`-identity: create_app's default IS the module constant (a re-typed
+    # cwd-relative literal in the signature would leave all other tests green).
+    assert create_app.__kwdefaults__ is not None
+    assert create_app.__kwdefaults__["static_dir"] is FRONTEND_DIST

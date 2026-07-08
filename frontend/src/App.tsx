@@ -29,6 +29,10 @@ export default function App() {
   const [state, setState] = useState<FetchState>("loading");
   const [unreachable, setUnreachable] = useState<string | null>(null);
   const [lastTrigger, setLastTrigger] = useState<TriggerResponse | null>(null);
+  // True once at least one poll has RESOLVED after the most recent trigger —
+  // the failure note must not render (or flash) before the post-trigger poll
+  // has actually reported back.
+  const [pollSettledSinceTrigger, setPollSettledSinceTrigger] = useState(true);
   // Bumped after a trigger: re-runs the poll effect (immediate tick + fresh interval).
   const [pollNonce, setPollNonce] = useState(0);
 
@@ -46,8 +50,15 @@ export default function App() {
         } else {
           setLatest(data);
           setState("ready");
+          // Supersession clears the note: once ANY run at or past the
+          // triggered id is the latest ok run, the note is stale (a newer
+          // scheduled/manual ok run must not resurrect an old failure note).
+          setLastTrigger((prev) =>
+            prev !== null && data.run.run_id >= prev.run_id ? null : prev
+          );
         }
         setUnreachable(null);
+        setPollSettledSinceTrigger(true);
       } catch (error) {
         if (cancelled) {
           return;
@@ -66,13 +77,20 @@ export default function App() {
 
   function handleTriggered(result: TriggerResponse): void {
     setLastTrigger(result);
+    setPollSettledSinceTrigger(false); // suppress the note until a poll resolves
     setPollNonce((nonce) => nonce + 1); // re-poll now
   }
 
   // A forced trigger that did not become the latest ok run failed (force
-  // bypasses the freshness gate, so it cannot have been skipped). Surface it.
+  // bypasses the freshness gate, so it cannot have been skipped). Only shown
+  // after the post-trigger poll resolved (no flash), and cleared forever once
+  // any run_id >= the triggered id is latest (no stale banner under Step 11's
+  // scheduler).
   const triggerNote =
-    lastTrigger !== null && state !== "loading" && latest?.run.run_id !== lastTrigger.run_id
+    lastTrigger !== null &&
+    pollSettledSinceTrigger &&
+    state !== "loading" &&
+    (latest === null || latest.run.run_id < lastTrigger.run_id)
       ? lastTrigger.already_running
         ? `a run was already active (run #${lastTrigger.run_id})`
         : `triggered run #${lastTrigger.run_id} did not finish ok — check the run ledger ` +

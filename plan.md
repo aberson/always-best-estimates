@@ -377,6 +377,7 @@ into Automated + Manual subsections.
 - **Produces:** `frontend/src/**`
 - **Done when:** the UI renders all stage cards from a live run; the refresh button triggers a run and the cards update; error/skipped states render (not blank); runtime reviewers pass (no auth gate — the URL is open).
 - **Depends on:** 8
+- **Status:** DONE (2026-07-08) — runtime reviewers CONFIRMED against live Playwright evidence on the real db (all six cards ok, weights 45.4/54.6/0.0 summing 100%, macro-disabled amber badge, SPY/ACWI overlap caveat, clean backend log, zero console errors). FastAPI serves frontend/dist via conditional StaticFiles mount (API routes win; /api 404s stay JSON). Note: error/skipped card renderers exist but are unreachable via the latest-ok poll path — exercised only with crafted data; M1 covers the visual pass.
 
 ### Step 11: Scheduler + degraded modes + error resilience
 - **Problem:** `scheduler.py` — asyncio lifespan task: fixed-delay loop (`wait_for(event, timeout=300)`) + on-demand trigger + `asyncio.Lock` single-flight; pipeline body via `ThreadPoolExecutor(max_workers=1)`; stage-0 freshness gate (skip on unchanged); separate daily-fetch vs 5-min-recompute paths; per-iteration try/except → `status='error'` row + loop restart; `wal_checkpoint(TRUNCATE)` after each run.
