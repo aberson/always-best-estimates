@@ -74,11 +74,21 @@ backend/abe/   constants.py, storage.py, ingest/, features/, afml/, model/, blen
                eval/, pipeline.py, scheduler.py, api.py
 frontend/      React + Vite (one card per pipeline stage)
 data/          SQLite db (gitignored)
-docs/          seed-hardening research (7-dimension landmine catalog)
-plan.md        full build plan (15 automated steps + M1/M2 operator UAT)
+docs/          seed-hardening research + docs/eval/ (committed walk-forward eval reports)
+scripts/       smoke.py (real end-to-end gate, exit 0/1/3)
+plan.md        full build plan (15 automated steps + M1/M2 operator UAT; per-step Status records)
 ```
 
 ## Status
 
-**Planned.** Build via the GitHub issues (Steps 1–15 automated + M1/M2 operator UAT); the full plan
-with per-step acceptance criteria is in [`plan.md`](plan.md).
+**V1 automated build complete (Steps 1–14)** — issues #2–#15 closed. Full six-stage pipeline live
+end-to-end (EWMA default): scheduler + degraded modes, React stage-card UI served by FastAPI,
+AFML feature layer, minimal JEPA (41.8k params) behind the `ABE_MODEL` toggle, and the
+pre-registered walk-forward eval committed at
+[`docs/eval/jepa-vs-ewma-2026-07-08.md`](docs/eval/jepa-vs-ewma-2026-07-08.md) (mechanical verdict
+"JEPA promoted" on a thin margin, honestly read as parity — the live default remains EWMA;
+promotion is a manual operator action). 401 tests passing, 0 type errors, 0 lint violations;
+real end-to-end smoke green (`uv run pytest -m smoke`).
+
+**Remaining (operator):** Step 15 soak (#16, ≥4h wait), M1 UI walkthrough (#17), M2 degraded-mode
+check (#18 — needs a FRED key in `.env` first). Details in [`plan.md`](plan.md) §Manual Steps.

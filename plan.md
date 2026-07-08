@@ -42,7 +42,7 @@ multi-horizon forecasts; relative (P ≠ I) Black-Litterman views.
 | ML | PyTorch | Minimal JEPA (encoder + EMA target + predictor + VICReg variance-covariance regularization) |
 | Portfolio math | PyPortfolioOpt `==1.6.0` | Black-Litterman (Idzorek) + Ledoit-Wolf shrinkage only |
 | Optimization | cvxpy (solver pinned `CLARABEL`) | Hand-rolled mean-variance-utility QP with turnover |
-| Feature transforms | in-project `backend/afml/` | Fractional differentiation + purged CV (charlesrambo repo is unlicensed / pandas-2-broken — reference only) |
+| Feature transforms | in-project `backend/abe/afml/` (+ statsmodels for the ADF test, offline only) | Fractional differentiation + purged CV (charlesrambo repo is unlicensed / pandas-2-broken — reference only) |
 | Data — prices | yfinance `>=1.5` | Free daily adjusted OHLCV; primary at ≤1 fetch/day |
 | Data — macro | fredapi (FRED API key) | US macro daily series |
 | Storage | SQLite (WAL mode) | Local, single-writer, timestamped history |
@@ -105,7 +105,10 @@ returns or uncertainty, so the full chain is named explicitly:
 - **σ (epistemic — uncertainty of the *mean*, NOT raw return variance):** deep-ensemble (K=3–5
   seeds) disagreement + rolling purged-walk-forward residual variance. If σ were the raw return
   variance (~20–40× larger), every Idzorek confidence would collapse to ~5% and views would never
-  move the portfolio.
+  move the portfolio. *(Superseded for V1 at build time — see Step 5's Status: `Forecast.sigma` is
+  defined as the H-day PREDICTIVE forecast std, the scale the calibration gate below actually
+  measures; the "epistemic" phrasing here described the composite's intent, not its operative
+  unit.)*
 - **Calibration gate:** μ ± 1.64σ must cover ~90% of realized H-day returns on the walk-forward
   window.
 - **Idzorek confidence:** `c = clamp(|2·Φ(μ/σ) − 1|, 0.02, 0.95)` — a no-information forecast → c≈0
@@ -188,7 +191,7 @@ always-best-estimates/
 ├── frontend/
 │   ├── vite.config.ts           # port 5174, strictPort, host 127.0.0.1, /api proxy
 │   └── src/ {App.tsx, api.ts, components/*}
-├── scripts/                     # smoke.py, soak.py, backfill entrypoint
+├── scripts/                     # smoke.py (backfill runs via python -m abe.ingest.prices; the Step 15 soak is an operator procedure, not a script)
 └── tests/                       # unit + integration + anchors
 ```
 
@@ -491,7 +494,9 @@ wall since ~2026-03). Google Finance: no API since 2012.
 
 **Measurement-validity anchors (must exist in CI):** (1) no-view ⇒ weights = W_MKT within 1e-6
 through the production entry point; (2) absurd Q at c=0.99 moves weights materially; (3) shuffled-
-target JEPA scores worse than the real run; (4) frac-diff garbage anchors (noise→d≈0, RW→d≈1).
+target JEPA scores worse than the real run; (4) frac-diff garbage anchors (noise→d≈0; RW→d≥0.35 as
+shipped — the smallest TESTABLE passing d at threshold 1e-5 on a 2000-bar fold, with the d=0-fails-ADF
+half asserted separately; see Step 12's Status for why fixed-width FFD lands below the naive d≈1).
 
 **Reference material** (the two PDFs are external third-party papers kept in the workspace `papers/`
 dir, referenced by absolute path — not committed to this repo): JEPA —
@@ -501,5 +506,35 @@ catalog (in-repo) — [`docs/investigations/seed-hardening-research-2026-07-07.m
 
 ---
 
-**Next:** run `/plan-expedite --plan plan.md` to auto-prep (plan-review → plan-wrap → repo-sync →
-session-wrap) for `/build-phase`, or `/plan-review` first if you want a manual review pass.
+## 13. V1 Build Record (2026-07-07 → 2026-07-08)
+
+**Steps 1–14 all DONE; issues #2–#15 closed. 401/401 tests passing. Zero type errors. Zero lint
+violations. Real end-to-end smoke green.**
+
+Built via `/build-phase` (one dev agent + 4-reviewer code gauntlet per step; Step 10 ran the full
+7-reviewer runtime-evidence review against live Playwright captures on the real db). Every step's
+`**Status:**` line above records its decisions and deviations; the load-bearing ones:
+
+- **σ semantics frozen (Step 5):** `Forecast.sigma` = H-day predictive forecast std (calibration-gate
+  scale). Idzorek confidence computed from the RAW H-day (μ, σ) pair (Step 6).
+- **yfinance path (Step 3):** `yf.Ticker().history(auto_adjust=True, actions=False, interval="1d")`
+  + fail-loud config replaces `download()` (which swallows all exceptions); incremental fetch uses a
+  10-day inclusive overlap window with an adj_close consistency check → full refresh on rebase.
+- **Freshness gate (Step 8):** dual watermarks (`MAX(date)` + `MAX(fetched_at_utc)`) so in-place
+  rebases un-skip recomputes.
+- **Scheduler (Step 11):** structural single-flight; trigger answers 202 at run START; daily fetch
+  ≥22:00 UTC; stale-'running' sweeps at startup and each iteration.
+- **Eval verdict (Step 14):** committed at `docs/eval/jepa-vs-ewma-2026-07-08.md` — mechanical rule
+  says "JEPA promoted" (pooled MSE 1.389e-3 vs 1.429e-3; coverage 0.897 vs 0.924) but the honest
+  read is parity via the absence of EWMA's anti-momentum bias. **Live default remains EWMA**;
+  promotion is a manual operator action (`ABE_MODEL=jepa` + `ABE_JEPA_CHECKPOINT`).
+
+### Fresh context notes
+
+| Issue | Detail |
+|---|---|
+| No FRED key on the build machine | Macro paths ship keyed, self-skipping network tests; degraded mode (`MACRO_DISABLED_NO_KEY`, exit 2) was the live-verified path. Operator adds the key before M2. |
+| Real price data | `data/abe.db` (gitignored) holds the full backfill (SPY 8415 / ACWI 4597 / AGG 5728 rows); `uv run pytest -m smoke` and `-m realdb` need it. |
+| Test markers | default `uv run pytest` deselects `smoke`/`network`/`realdb` via addopts; the smoke gate NEVER skips vacuously (missing db = failure). |
+
+**Next:** operator runs Step 15 soak (#16), then M1 (#17) / M2 (#18).

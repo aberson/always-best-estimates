@@ -20,8 +20,9 @@ and promoted only if it wins a walk-forward eval. Full plan: [`plan.md`](plan.md
 | Portfolio math | PyPortfolioOpt `==1.6.0` (Black-Litterman + Ledoit-Wolf only) |
 | Optimizer | cvxpy (solver `CLARABEL`) |
 | Data | yfinance `>=1.5` (prices), fredapi (macro), SQLite (WAL) cache |
+| Stationarity | statsmodels (ADF test in the offline min-d search only) |
 | Frontend | React + Vite (TypeScript) |
-| Tests | pytest (unit + integration + smoke + soak) |
+| Tests | pytest (default suite + `smoke`/`network`/`realdb` markers, deselected by addopts) |
 
 Ports: backend `127.0.0.1:8140`, Vite dev `127.0.0.1:5174`.
 
@@ -35,10 +36,13 @@ uv run python -m abe.ingest.macro --backfill               # one-time macro back
 uv run uvicorn abe.api:app --host 127.0.0.1 --port 8140    # run backend (starts scheduler)
 npm run dev --prefix frontend                              # run Vite dev server on 127.0.0.1:5174
 npm run build --prefix frontend                            # build UI (prod: FastAPI serves it)
-uv run pytest                                              # run tests
-uv run pytest -m smoke                                     # 60s real end-to-end smoke gate
+uv run pytest                                              # run tests (smoke/network/realdb deselected)
+uv run pytest -m smoke                                     # real end-to-end smoke gate (needs data/abe.db; NEVER skips)
 uv run ruff check .                                        # lint
-uv run mypy backend                                        # typecheck
+uv run mypy backend                                        # typecheck (strict)
+uv run python scripts/smoke.py                             # same smoke via CLI (exit 0/1/3 = pass/failure/precondition)
+uv run python -m abe.model.train --db data/abe.db --out data/jepa.pt      # offline JEPA training -> checkpoint
+uv run python -m abe.eval.walk_forward --db data/abe.db --out docs/eval/jepa-vs-ewma-<date>.md   # promotion eval
 ```
 
 ## 4. Directory layout
@@ -59,8 +63,9 @@ always-best-estimates/
 │   ├── eval/ walk_forward.py
 │   ├── pipeline.py, scheduler.py, api.py
 ├── frontend/ (vite.config.ts, src/{App.tsx,api.ts,components/})
-├── scripts/ (smoke.py, soak.py)
-└── tests/
+├── scripts/ (smoke.py)
+├── docs/eval/                   # committed walk-forward eval reports
+└── tests/ (+ tests/seeding.py + tests/conftest.py shared helpers)
 ```
 
 ## 5. Architecture
@@ -71,8 +76,10 @@ always-best-estimates/
   trigger + single-flight lock. **Fetch is split from recompute**: the 5-min loop recomputes from
   SQLite only; a separate daily job fetches prices/macro incrementally (prevents Yahoo IP bans).
 - **WorldModel (`model/`)** — Protocol `forecast(features) → {asset:(mu_H,sigma_H)}` over H=21.
-  EWMA baseline default; JEPA optional behind a toggle. σ is **epistemic** (uncertainty of the mean),
-  mapped to Idzorek confidence `c = clamp(|2Φ(μ/σ)−1|, 0.02, 0.95)`.
+  EWMA baseline default; JEPA behind the `ABE_MODEL`/`ABE_JEPA_CHECKPOINT` env toggle (invalid
+  config fails loud at startup). σ is the **H-day PREDICTIVE forecast std** (the scale at which
+  μ±1.64σ covers ~90% of realized returns), mapped to Idzorek confidence
+  `c = clamp(|2Φ(μ/σ)−1|, 0.02, 0.95)` computed from the RAW H-day pair.
 - **Blend (`blend/`)** — Ledoit-Wolf Σ (only covariance path; SPY⊂ACWI ⇒ near-singular), π = δ·Σ·w_mkt,
   BL posterior via PyPortfolioOpt idzorek mode. Everything in annualized excess returns (rf=0.0 explicit).
 - **Optimize (`optimize/mvu.py`)** — hand-rolled cvxpy mean-variance-utility (`sum_squares(chol.T@w)`,
@@ -80,8 +87,13 @@ always-best-estimates/
 
 ## 6. Current state
 
-**Plan written, no code yet.** Build via `/build-phase --plan plan.md` (15 automated steps +
-M1/M2 manual). Update this section at each phase end via `/repo-update`.
+**V1 automated build complete (Steps 1–14, 2026-07-08)** — issues #2–#15 closed; 401 tests, mypy
+strict clean, ruff clean, real smoke green. Six-stage pipeline runs end-to-end on the EWMA default;
+JEPA trained/evaluated behind the toggle; the pre-registered eval
+([`docs/eval/jepa-vs-ewma-2026-07-08.md`](docs/eval/jepa-vs-ewma-2026-07-08.md)) reads "JEPA
+promoted" on a thin margin (honestly: parity) — **live default remains EWMA**, promotion is a
+manual operator action. Remaining: Step 15 soak (#16, ≥4h wait), M1 (#17), M2 (#18 — needs a FRED
+key in `.env` first). Per-step decisions live in `plan.md`'s `**Status:**` lines + §13 Build Record.
 
 ## 7. Environment requirements
 
