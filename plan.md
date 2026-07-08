@@ -327,6 +327,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/model/base.py`, `backend/abe/features/basic.py`
 - **Done when:** EWMA emits `(mu, sigma)` per asset with σ>0; the contract test asserts shape, horizon, and non-degenerate σ; μ/σ are per-horizon (H-day) returns.
 - **Depends on:** 2
+- **Status:** DONE (2026-07-08) — SEMANTIC DECISION recorded: `Forecast.sigma` is the **H-day PREDICTIVE forecast std** (the scale at which μ±1.64σ covers ~90% of realized H-day returns — §4's calibration gate is the definition). EWMA's trailing forecast-error std is predictive by construction; Step 13's JEPA composite must land on this same scale or Step 14's comparison is invalid. §4's "epistemic" phrasing is superseded for V1; the failure mode to avoid is raw-VARIANCE/daily/annualized units. Contract test (assert_worldmodel_contract in tests/test_model_base.py) is frozen; implementations must arm expected_daily_mu on a known-drift input + pin σ scale on iid noise.
 
 ### Step 6: Blend module — covariance + confidence + Black-Litterman
 - **Problem:** `blend/covariance.py` (Ledoit-Wolf as the only Σ path, annualized), `blend/confidence.py` (σ → Idzorek confidence `c = clamp(|2Φ(μ/σ)−1|, 0.02, 0.95)`, leaf module), `blend/black_litterman.py` (`bl_blend` pure fn: π = δ·Σ·w_mkt with `risk_free_rate=0.0`; `BlackLittermanModel(omega='idzorek', view_confidences, tau=0.05)`; ONE ordered `View` list → P/Q/confidences; diagnostics).

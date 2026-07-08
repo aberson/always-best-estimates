@@ -5,8 +5,8 @@
 **Last written:** 2026-07-08T00:30:00Z
 
 ## WIP
-**Current:** Step 5: WorldModel interface + EWMA baseline (#6)
-**Approach:** model/base.py — WorldModel Protocol forecast(features)→{asset:(mu_H,sigma_H)} over H=21 + EWMABaseline (μ=EWMA of returns, σ=trailing forecast-error std); features/basic.py (log-returns, realized vol); contract test every implementation must pass
+**Current:** Step 6: Blend — covariance + confidence + Black-Litterman (#7)
+**Approach:** blend/covariance.py (Ledoit-Wolf only Σ, annualized), blend/confidence.py (σ→Idzorek c=clamp(|2Φ(μ/σ)−1|,0.02,0.95)), blend/black_litterman.py (bl_blend pure fn, π=δΣw_mkt, idzorek omega, rf=0.0 explicit, one ordered View list)
 
 ## Next Action
 /build-phase --plan plan.md --resume 3
@@ -15,7 +15,8 @@
 - [814954d] Step 1 Scaffold + constants + observatory registration: PASS iter 2/3 (17 tests; #2 closed)
 - [0a4ea36] Step 2 SQLite storage module: PASS iter 2/3 (40 tests total; #3 closed)
 - Step 3 Price ingest yfinance+cache: PASS iter 2/3 (67 tests total; #4 closed; real backfill in data/abe.db: SPY 8415/ACWI 4597/AGG 5728 rows; AGG 10y guard 1.37%>1%)
-- Step 4 FRED macro ingest: PASS iter 2/3 (89 tests total; #5; degraded mode live-verified exit 2; real fetch = keyed self-skip test, NO KEY on machine)
+- Step 4 FRED macro ingest: PASS iter 2/3 (89 tests total; #5 closed; degraded mode live-verified exit 2; real fetch = keyed self-skip test, NO KEY on machine)
+- Step 5 WorldModel + EWMA: PASS iter 2/3 (145 tests total; #6; SIGMA = H-day PREDICTIVE forecast std — decision recorded in plan Step 5 Status; contract fn frozen in tests/test_model_base.py)
 
 ## Dead Ends
 (none yet)

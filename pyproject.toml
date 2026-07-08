@@ -62,6 +62,10 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# tests/ on sys.path so the pinned cross-test import of the frozen WorldModel
+# contract (`from test_model_base import assert_worldmodel_contract`, reused by
+# Step 13's JEPA suite) survives every import mode, incl. --import-mode=importlib.
+pythonpath = ["tests"]
 # Default runs stay offline (plan section 8: fetch is split from recompute; no
 # accidental Yahoo hits). Select explicitly: `pytest -m network` / `-m realdb`.
 addopts = '-m "not network and not realdb"'
