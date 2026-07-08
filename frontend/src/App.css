@@ -347,3 +347,92 @@ button:disabled {
 .muted {
   color: var(--text-dim);
 }
+
+/* ------------------------------------------------- optimize objective */
+
+.objective {
+  margin: 0.5rem 0 0.4rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--bg);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+}
+
+.objective-form {
+  display: block;
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.82rem;
+  color: var(--text);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.objective .muted {
+  margin: 0.35rem 0 0;
+  font-size: 0.8rem;
+}
+
+/* --------------------------------------------- how-is-this-computed expander */
+
+.explain {
+  border-top: 1px solid var(--panel-edge);
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+}
+
+.explain-toggle {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  padding: 0;
+}
+
+.explain-toggle:hover {
+  text-decoration: underline;
+}
+
+.explain-list {
+  margin: 0.5rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.explain-item dt {
+  font-weight: 650;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.explain-item dd {
+  margin: 0.15rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.explain-item code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.8rem;
+  color: var(--accent);
+  background: var(--bg);
+  padding: 0.1rem 0.35rem;
+  border-radius: 5px;
+  align-self: flex-start;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.explain-desc {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+}
+
+.explain-example {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  font-style: italic;
+}

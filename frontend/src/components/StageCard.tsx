@@ -13,8 +13,8 @@
  * rendered prominently with the exception class pulled out.
  */
 
-import type { ReactNode } from "react";
-import type { StageRow } from "../api";
+import { useState, type ReactNode } from "react";
+import type { Explanation, StageRow } from "../api";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -30,6 +30,15 @@ const STAGE_TITLES: Record<string, string> = {
 /** The optimizer card's mandated caveat (plan Step 10). */
 const OVERLAP_CAVEAT =
   "Note: SPY overlaps ACWI (~60% US); combined equity exposure reads through both.";
+
+/** Which calc.py explanation keys each card reveals in its inline
+ *  "how is this computed?" expander (fed by GET /api/explain). */
+const STAGE_EXPLAIN_KEYS: Record<string, string[]> = {
+  features: ["log_return", "realized_vol"],
+  forecast: ["ewma_mu", "forecast_sigma"],
+  blend: ["bl_prior", "bl_view", "bl_confidence", "bl_posterior"],
+  optimize: ["mvu_objective"],
+};
 
 // --------------------------------------------------------------------------
 // Narrowing + formatting helpers (detail payloads arrive as unknown JSON)
@@ -172,12 +181,15 @@ function renderMacroBadge(macro: JsonRecord): ReactNode {
   if (enabled) {
     return (
       <span className="badge badge-ok" title={message}>
-        macro: enabled
+        Macro (FRED): enabled
       </span>
     );
   }
   // Degraded macro is a card FACT, not an error (pipeline.py contract).
-  const label = code === "MACRO_DISABLED_NO_KEY" ? "macro disabled: no key" : `macro disabled: ${code}`;
+  const label =
+    code === "MACRO_DISABLED_NO_KEY"
+      ? "Macro (FRED) disabled: no key"
+      : `Macro (FRED) disabled: ${code}`;
   return (
     <span className="badge badge-amber" title={message}>
       {label}
@@ -217,7 +229,10 @@ function renderIngest(detail: JsonRecord): ReactNode {
         </tbody>
       </table>
       <div className="badge-row">
-        <span className="badge">source: {scalar(detail["source"])}</span>
+        {asString(detail["price_provider"]) !== null ? (
+          <span className="badge">Prices: {asString(detail["price_provider"])}</span>
+        ) : null}
+        <span className="badge">served from: {scalar(detail["source"])}</span>
         {renderMacroBadge(macro)}
       </div>
     </>
@@ -226,6 +241,7 @@ function renderIngest(detail: JsonRecord): ReactNode {
 
 function renderFeatures(detail: JsonRecord): ReactNode {
   const latest = asRecord(detail["latest"]);
+  const windows = asRecord(detail["windows"]) ?? {};
   const names = Array.isArray(detail["features"])
     ? detail["features"].filter((name): name is string => typeof name === "string")
     : null;
@@ -238,9 +254,15 @@ function renderFeatures(detail: JsonRecord): ReactNode {
         <tr>
           <th>asset</th>
           <th>date</th>
-          {names.map((name) => (
-            <th key={name}>{name}</th>
-          ))}
+          {names.map((name) => {
+            const win = asString(windows[name]);
+            return (
+              <th key={name}>
+                {name}
+                {win !== null ? ` (${win})` : ""}
+              </th>
+            );
+          })}
         </tr>
       </thead>
       <tbody>
@@ -302,38 +324,50 @@ function renderForecast(detail: JsonRecord): ReactNode {
 
 function renderBlend(detail: JsonRecord): ReactNode {
   const posteriorMu = asRecord(detail["posterior_mu"]);
-  const posteriorSigma = asRecord(detail["posterior_sigma"]);
   const confidences = asRecord(detail["confidences"]);
-  if (posteriorMu === null || posteriorSigma === null || confidences === null) {
+  if (posteriorMu === null || confidences === null) {
     return null;
   }
+  // The three Black-Litterman pieces: equilibrium prior (pi), the forecast
+  // view (Q), and the blended posterior. prior/view are additive fields that
+  // may be absent on rows written before this stage was enriched.
+  const prior = asRecord(detail["prior"]);
+  const view = asRecord(detail["view"]);
   return (
-    <table className="detail-table">
-      <thead>
-        <tr>
-          <th>asset</th>
-          <th>posterior &mu; (ann.)</th>
-          <th>confidence</th>
-        </tr>
-      </thead>
-      <tbody>
-        {Object.entries(posteriorMu).map(([asset, rawMu]) => {
-          const mu = asNumber(rawMu);
-          const sigma = asNumber(posteriorSigma[asset]);
-          const confidence = asNumber(confidences[asset]);
-          return (
-            <tr key={asset}>
-              <th>{asset}</th>
-              <td>
-                {mu !== null ? signedPct(mu) : scalar(rawMu)}
-                {sigma !== null ? ` ± ${pct(sigma, 2)}` : ""}
-              </td>
-              <td>{confidence !== null ? pct(confidence, 0) : scalar(confidences[asset])}</td>
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+    <>
+      <table className="detail-table">
+        <thead>
+          <tr>
+            <th>asset</th>
+            <th>prior &pi;</th>
+            <th>view Q</th>
+            <th>posterior &mu;</th>
+            <th>confidence</th>
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(posteriorMu).map(([asset, rawMu]) => {
+            const mu = asNumber(rawMu);
+            const pi = prior !== null ? asNumber(prior[asset]) : null;
+            const q = view !== null ? asNumber(view[asset]) : null;
+            const confidence = asNumber(confidences[asset]);
+            return (
+              <tr key={asset}>
+                <th>{asset}</th>
+                <td>{pi !== null ? signedPct(pi) : "—"}</td>
+                <td>{q !== null ? signedPct(q) : "—"}</td>
+                <td>{mu !== null ? signedPct(mu) : scalar(rawMu)}</td>
+                <td>{confidence !== null ? pct(confidence, 0) : scalar(confidences[asset])}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <p className="caveat">
+        All annualized. View Q is the Forecast annualized; the posterior blends the
+        market-equilibrium prior &pi; toward Q, weighted by each view&rsquo;s confidence.
+      </p>
+    </>
   );
 }
 
@@ -342,6 +376,11 @@ function renderOptimize(detail: JsonRecord): ReactNode {
   if (weights === null) {
     return null;
   }
+  const objective = asRecord(detail["objective"]);
+  const objWMax = objective !== null ? asNumber(objective["w_max"]) : null;
+  const constraints = objective !== null && Array.isArray(objective["constraints"])
+    ? (objective["constraints"] as unknown[]).map(String)
+    : [];
   const turnover = asRecord(detail["turnover"]) ?? {};
   const prevWeights = asRecord(detail["prev_weights"]);
   const relaxed = detail["relaxed_turnover"] === true;
@@ -388,6 +427,19 @@ function renderOptimize(detail: JsonRecord): ReactNode {
           })}
         </tbody>
       </table>
+      {objective !== null ? (
+        <div className="objective">
+          <code className="objective-form">{scalar(objective["form"])}</code>
+          <p className="muted">
+            risk aversion &delta; = {scalar(objective["delta"])}, turnover penalty &gamma; ={" "}
+            {scalar(objective["gamma_tc"])}, max weight ={" "}
+            {objWMax !== null ? pct(objWMax, 0) : scalar(objective["w_max"])}
+          </p>
+          {constraints.length > 0 ? (
+            <p className="muted">subject to: {constraints.join("; ")}</p>
+          ) : null}
+        </div>
+      ) : null}
       <div className="badge-row">
         <span className="badge">total turnover: {pct(totalTurnover, 2)}</span>
         <span className="badge">solver: {scalar(detail["solver_status"])}</span>
@@ -437,7 +489,14 @@ function detailBody(stage: StageRow): ReactNode {
   return rawJsonFallback(stage.detail);
 }
 
-export default function StageCard({ stage }: { stage: StageRow }) {
+export default function StageCard({
+  stage,
+  explanations,
+}: {
+  stage: StageRow;
+  explanations?: Record<string, Explanation>;
+}) {
+  const [showExplain, setShowExplain] = useState(false);
   const duration = durationLabel(stage.started_at_utc, stage.finished_at_utc);
   const pillClass =
     stage.status === "ok"
@@ -447,6 +506,10 @@ export default function StageCard({ stage }: { stage: StageRow }) {
         : stage.status === "skipped"
           ? "pill pill-skipped"
           : "pill";
+  // Inline "how is this computed?" entries for this stage (calc.py registry).
+  const explainEntries = (STAGE_EXPLAIN_KEYS[stage.stage] ?? [])
+    .map((key) => (explanations ? explanations[key] : undefined))
+    .filter((entry): entry is Explanation => entry !== undefined);
   return (
     <section className={`card card-${stage.status}`}>
       <header className="card-head">
@@ -457,6 +520,32 @@ export default function StageCard({ stage }: { stage: StageRow }) {
         </span>
       </header>
       <div className="card-body">{detailBody(stage)}</div>
+      {explainEntries.length > 0 ? (
+        <div className="explain">
+          <button
+            type="button"
+            className="explain-toggle"
+            aria-expanded={showExplain}
+            onClick={() => setShowExplain((open) => !open)}
+          >
+            {showExplain ? "▾ hide how this is computed" : "▸ how is this computed?"}
+          </button>
+          {showExplain ? (
+            <dl className="explain-list">
+              {explainEntries.map((entry) => (
+                <div key={entry.label} className="explain-item">
+                  <dt>{entry.label}</dt>
+                  <dd>
+                    <code>{entry.formula}</code>
+                    <span className="explain-desc">{entry.description}</span>
+                    <span className="explain-example">e.g. {entry.example}</span>
+                  </dd>
+                </div>
+              ))}
+            </dl>
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }

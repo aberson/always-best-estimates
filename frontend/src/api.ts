@@ -71,6 +71,22 @@ export interface TriggerResponse {
   already_running: boolean;
 }
 
+/** One entry served by `GET /api/explain` (calc.py `Explanation.payload()`;
+ *  the registry keys by quantity, so `key` is the map key, not a field). */
+export interface Explanation {
+  label: string;
+  formula: string;
+  description: string;
+  example: string;
+  unit: string | null;
+  window: string | null;
+}
+
+/** `GET /api/explain` — the calc.py explanation registry, keyed by quantity. */
+export interface ExplainResponse {
+  explanations: Record<string, Explanation>;
+}
+
 /** Non-OK HTTP response (other than the latest-run 404, which is a state). */
 export class ApiError extends Error {
   readonly status: number;
@@ -131,4 +147,18 @@ export async function triggerRun(force = false): Promise<TriggerResponse> {
     throw new ApiError(response.status, `POST /api/runs/trigger failed: HTTP ${response.status}`);
   }
   return (await response.json()) as TriggerResponse;
+}
+
+/**
+ * The calc.py explanation registry (formula + worked example per quantity),
+ * keyed by quantity. Static content — fetched once by the App and passed to
+ * the cards for the inline "how is this computed?" expanders. A failure here
+ * is non-fatal: the cards simply render without explanations.
+ */
+export async function getExplanations(): Promise<Record<string, Explanation>> {
+  const response = await requestJson("/api/explain");
+  if (!response.ok) {
+    throw new ApiError(response.status, `GET /api/explain failed: HTTP ${response.status}`);
+  }
+  return ((await response.json()) as ExplainResponse).explanations;
 }

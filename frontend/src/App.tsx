@@ -14,8 +14,8 @@
  */
 
 import { useEffect, useState } from "react";
-import type { LatestRunResponse, TriggerResponse } from "./api";
-import { getLatestRun } from "./api";
+import type { Explanation, LatestRunResponse, TriggerResponse } from "./api";
+import { getExplanations, getLatestRun } from "./api";
 import RunHeader from "./components/RunHeader";
 import StageCard from "./components/StageCard";
 import "./App.css";
@@ -41,6 +41,25 @@ export default function App() {
   const [pollsSinceTrigger, setPollsSinceTrigger] = useState(FAILURE_NOTE_POLLS);
   // Bumped after a trigger: re-runs the poll effect (immediate tick + fresh interval).
   const [pollNonce, setPollNonce] = useState(0);
+  // Static calc.py explanation registry, fetched once. A failure is non-fatal:
+  // the cards render without the "how is this computed?" expanders.
+  const [explanations, setExplanations] = useState<Record<string, Explanation>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    void getExplanations()
+      .then((data) => {
+        if (!cancelled) {
+          setExplanations(data);
+        }
+      })
+      .catch(() => {
+        /* non-fatal: cards render without explanations */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,7 +145,7 @@ export default function App() {
       {latest !== null ? (
         <div className="cards">
           {latest.stages.map((stage) => (
-            <StageCard key={stage.stage} stage={stage} />
+            <StageCard key={stage.stage} stage={stage} explanations={explanations} />
           ))}
         </div>
       ) : null}
