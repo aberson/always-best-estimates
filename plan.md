@@ -357,6 +357,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/{pipeline,api}.py`
 - **Done when:** an integration test drives `POST /api/runs/trigger` end-to-end **through the production FastAPI route** (TestClient with lifespan) and asserts rows land in `runs`, `run_stages`, and `target_weights` with weights summing to 1; `/api/runs/latest` returns the run + stages.
 - **Depends on:** 3, 4, 5, 6, 7
+- **Status:** DONE (2026-07-08) — freshness gate uses DUAL watermarks (MAX(date) + MAX(fetched_at_utc)) so in-place adj_close rebases un-skip recomputes. Two-phase transaction: phase-0 autocommit runs row, phase-1 BEGIN IMMEDIATE data writes (rollback-verified), phase-2 error-ledger replay. V1 trigger runs the pipeline synchronously on the event loop (ALL routes stall during a run — Step 11's executor swap fixes; Step 11 also owns the stale-'running' startup sweep). probe_fred_key runs BEFORE open_writer (leak-proof ordering).
 
 ### Step 9: Smoke gate — one real end-to-end cycle
 - **Problem:** `scripts/smoke.py` — a ~60-second real end-to-end run with NO mocks: boot the app, trigger one real run against cached data, assert no exception, all `run_stages` `status='ok'`, and `target_weights` persisted. Surfaces producer/consumer drift that mocked unit tests miss.
