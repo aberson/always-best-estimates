@@ -1,0 +1,349 @@
+/* always-best-estimates UI — plain dark-friendly CSS, no component library.
+   Status colors: ok green / error red / skipped amber (plan Step 10). */
+
+:root {
+  --bg: #14171c;
+  --panel: #1d222a;
+  --panel-edge: #2c333e;
+  --text: #d7dde6;
+  --text-dim: #8b95a3;
+  --green: #3fb968;
+  --green-bg: #17351f;
+  --red: #e5534b;
+  --red-bg: #3a1d1b;
+  --amber: #d9a43e;
+  --amber-bg: #38300f;
+  --accent: #5b9dd9;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.app {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+/* ---------------------------------------------------------------- header */
+
+.app-head h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.run-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+}
+
+.run-header-facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 1rem;
+}
+
+.run-age strong {
+  color: var(--text);
+}
+
+.run-meta {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+}
+
+.run-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.trigger-error {
+  color: var(--red);
+  font-size: 0.85rem;
+}
+
+button {
+  background: var(--accent);
+  color: #10141a;
+  border: none;
+  border-radius: 8px;
+  padding: 0.45rem 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  filter: brightness(1.12);
+}
+
+button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+/* --------------------------------------------------------------- banners */
+
+.banner {
+  margin: 1rem 0 0;
+  padding: 0.6rem 1rem;
+  border-radius: 8px;
+  font-size: 0.92rem;
+}
+
+.banner-error {
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  color: #f1b6b2;
+}
+
+.banner-note {
+  background: var(--amber-bg);
+  border: 1px solid var(--amber);
+  color: #ead9a8;
+}
+
+.empty-state {
+  margin-top: 2rem;
+  color: var(--text-dim);
+  font-size: 1.05rem;
+}
+
+/* ----------------------------------------------------------------- cards */
+
+.cards {
+  margin-top: 1.25rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(330px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem 1rem;
+  overflow-x: auto;
+}
+
+.card-error {
+  border-color: var(--red);
+}
+
+.card-skipped {
+  border-color: var(--amber);
+}
+
+.card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+
+.card-head h2 {
+  margin: 0;
+  font-size: 1.02rem;
+  font-weight: 650;
+}
+
+.card-head-right {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.duration {
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+/* ------------------------------------------------------------ pills/badges */
+
+.pill {
+  border-radius: 999px;
+  padding: 0.12rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  background: var(--panel-edge);
+  color: var(--text-dim);
+}
+
+.pill-ok {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.pill-error {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.pill-skipped {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.badge-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.6rem;
+}
+
+.badge {
+  border-radius: 6px;
+  padding: 0.1rem 0.5rem;
+  font-size: 0.8rem;
+  background: var(--panel-edge);
+  color: var(--text-dim);
+}
+
+.badge-ok {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.badge-amber {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+/* ---------------------------------------------------------- detail bodies */
+
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.detail-table th,
+.detail-table td {
+  text-align: left;
+  padding: 0.22rem 0.6rem 0.22rem 0;
+  border-bottom: 1px solid var(--panel-edge);
+  font-weight: 400;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.detail-table thead th {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.detail-table tbody th {
+  color: var(--text-dim);
+  font-weight: 550;
+}
+
+.detail-table tr:last-child th,
+.detail-table tr:last-child td {
+  border-bottom: none;
+}
+
+.skip-reason {
+  margin: 0 0 0.6rem;
+  color: var(--amber);
+  font-size: 0.9rem;
+}
+
+/* THE WEIGHTS — the product of the whole pipeline, big and prominent. */
+.weights-row {
+  display: flex;
+  justify-content: space-around;
+  gap: 0.75rem;
+  margin: 0.35rem 0 0.9rem;
+}
+
+.weight-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.weight-value {
+  font-size: 2rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--green);
+}
+
+.weight-asset {
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+}
+
+.caveat {
+  margin: 0.7rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-style: italic;
+}
+
+/* ------------------------------------------------------- error / fallback */
+
+.error-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.error-class {
+  align-self: flex-start;
+  background: var(--red-bg);
+  color: var(--red);
+  border-radius: 6px;
+  padding: 0.12rem 0.55rem;
+  font-size: 0.85rem;
+  font-weight: 650;
+}
+
+.error-message {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #f1b6b2;
+  font-size: 0.88rem;
+}
+
+.raw-json {
+  margin: 0;
+  font-size: 0.8rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-dim);
+}
+
+.muted {
+  color: var(--text-dim);
+}

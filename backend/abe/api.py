@@ -53,6 +53,16 @@ Lifespan also resolves the macro status ONCE via
 with no key configured this makes no network request and yields the explicit
 ``MACRO_DISABLED_NO_KEY`` degraded mode, which every run surfaces on its
 ingest card.
+
+Production static serving (plan Step 10, section 2 one-process mode): IF the
+built frontend exists (``frontend/dist``, produced by ``npm run build
+--prefix frontend``), it is mounted at ``/`` via ``StaticFiles(html=True)``.
+The mount is registered LAST, so every API route (``/api/*``, ``/health``)
+matches first; the mount is CONDITIONAL on the directory existing so dev
+(Vite on :5174 proxying ``/api`` here) and tests without a build keep
+working — without a dist, ``GET /`` is a plain 404 while the API is
+untouched. The check runs at ``create_app`` time: build the frontend before
+starting uvicorn (a dist created afterwards needs a restart).
 """
 
 import json
@@ -63,6 +73,7 @@ from pathlib import Path
 from typing import Annotated, Any, Final
 
 from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from abe import storage
@@ -71,6 +82,7 @@ from abe.pipeline import run_pipeline
 
 __all__ = [
     "DEFAULT_HISTORY_LIMIT",
+    "FRONTEND_DIST",
     "MAX_HISTORY_LIMIT",
     "TriggerRequest",
     "app",
@@ -83,6 +95,11 @@ DEFAULT_HISTORY_LIMIT: Final[int] = 20
 MAX_HISTORY_LIMIT: Final[int] = 200
 """Upper bound on ``limit`` (the ledger grows forever; the API page must
 not). Enforced as a 422 REJECTION by query validation, not a silent clamp."""
+
+FRONTEND_DIST: Final[Path] = Path(__file__).resolve().parents[2] / "frontend" / "dist"
+"""The built frontend (``npm run build --prefix frontend``), resolved from
+this file's location (``backend/abe/`` -> repo root) so it is cwd-independent.
+Mounted at ``/`` by :func:`create_app` IF it exists (module docstring)."""
 
 _RUN_COLUMNS: Final[tuple[str, ...]] = (
     "run_id",
@@ -172,11 +189,19 @@ def _weight_dicts(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]
     ]
 
 
-def create_app(db_path: str | Path = storage.DEFAULT_DB_PATH) -> FastAPI:
+def create_app(
+    db_path: str | Path = storage.DEFAULT_DB_PATH,
+    *,
+    static_dir: str | Path = FRONTEND_DIST,
+) -> FastAPI:
     """Build the app against ``db_path`` (configurable for tests).
 
     The module-level ``app`` uses ``storage.DEFAULT_DB_PATH`` — that is the
     uvicorn production target.
+
+    ``static_dir`` is the built frontend to mount at ``/`` (default
+    :data:`FRONTEND_DIST`; configurable for tests). A missing directory means
+    NO mount — the conditional-serving contract in the module docstring.
     """
     resolved_path = Path(db_path)
 
@@ -258,6 +283,14 @@ def create_app(db_path: str | Path = storage.DEFAULT_DB_PATH) -> FastAPI:
             macro_status=request.app.state.macro_status,
         )
         return {"run_id": run_id, "already_running": False}
+
+    # Production static serving (module docstring): mounted LAST so every API
+    # route above matches first; conditional so dev/tests without a build
+    # (and the no-dist 404 contract) keep working. html=True serves
+    # index.html at ``/``.
+    resolved_static = Path(static_dir)
+    if resolved_static.is_dir():
+        app.mount("/", StaticFiles(directory=resolved_static, html=True), name="frontend")
 
     return app
 
