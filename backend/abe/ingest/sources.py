@@ -24,8 +24,15 @@ unconditionally either way.
 
 ``yfinance`` is imported lazily inside :meth:`YFinanceAdapter.fetch` only — the
 ``CacheAdapter`` path must work with zero network and zero yfinance import.
+
+This module also owns the shared write-boundary trio :data:`DATE_FORMAT` /
+:data:`DATE_KEY_RE` / :func:`utc_now_iso` — both ingest modules (prices, macro)
+import them from here so the date-key shape and the ``*_at_utc`` timestamp
+format have ONE source of truth (code-quality rule).
 """
 
+import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final, Protocol
 
@@ -34,11 +41,14 @@ import pandas as pd
 from abe import storage
 
 __all__ = [
+    "DATE_FORMAT",
+    "DATE_KEY_RE",
     "PRICE_COLUMNS",
     "CacheAdapter",
     "SourceAdapter",
     "YFinanceAdapter",
     "normalize_yfinance_frame",
+    "utc_now_iso",
 ]
 
 PRICE_COLUMNS: Final[tuple[str, ...]] = ("open", "high", "low", "close", "adj_close", "volume")
@@ -47,7 +57,17 @@ PRICE_COLUMNS: Final[tuple[str, ...]] = ("open", "high", "low", "close", "adj_cl
 _RAW_YFINANCE_COLUMNS: Final[frozenset[str]] = frozenset({"Open", "High", "Low", "Close", "Volume"})
 """Exact raw column set ``Ticker.history(auto_adjust=True, actions=False)`` returns."""
 
-_DATE_FORMAT: Final[str] = "%Y-%m-%d"
+DATE_FORMAT: Final[str] = "%Y-%m-%d"
+"""The ISO-8601 date-key strftime format (plan section 3 date-key rule)."""
+
+DATE_KEY_RE: Final[re.Pattern[str]] = re.compile(r"\d{4}-\d{2}-\d{2}")
+"""Write-boundary shape check for date keys — shared by the prices AND macro
+ingest boundaries; never re-declare it (one-source-of-truth rule)."""
+
+
+def utc_now_iso() -> str:
+    """UTC now as ISO-8601 with a ``Z`` suffix (the ``*_at_utc`` column format)."""
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 class SourceAdapter(Protocol):
@@ -99,7 +119,7 @@ def normalize_yfinance_frame(raw: pd.DataFrame) -> pd.DataFrame:
     if not isinstance(raw.index, pd.DatetimeIndex):
         raise ValueError(f"yfinance index is not a DatetimeIndex: {type(raw.index).__qualname__}")
     index = raw.index.tz_localize(None) if raw.index.tz is not None else raw.index
-    dates = pd.Index(index.strftime(_DATE_FORMAT), name="date")
+    dates = pd.Index(index.strftime(DATE_FORMAT), name="date")
     normalized = pd.DataFrame(
         {
             "open": raw["Open"].to_numpy(),

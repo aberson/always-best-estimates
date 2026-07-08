@@ -317,6 +317,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/ingest/macro.py`, `FRED_RELEASE_LAG` usage
 - **Done when:** the 6 daily series fetch and store; `available_date = obs_date + declared lag` asserted; a missing-key test starts the app in macro-disabled degraded mode with the stable code; empty-string FRED values parse as NaN (test).
 - **Depends on:** 2
+- **Status:** DONE (2026-07-07) — no FRED key on this machine: the real 6-series fetch ships as a keyed self-skipping `network` test (operator runs it after adding the key, pre-M2); degraded mode (MACRO_DISABLED_NO_KEY, exit 2) live-verified. Stable codes: MACRO_OK / MACRO_DISABLED_NO_KEY / MACRO_DISABLED_BAD_KEY; FRED calls bounded by 15s socket timeout.
 
 ### Step 5: WorldModel interface + EWMA baseline
 - **Problem:** `model/base.py` — the `WorldModel` Protocol `forecast(features) → {asset: (mu_H, sigma_H)}` over H=21, and `EWMABaseline` (μ = EWMA of returns; σ = trailing forecast-error std, a genuine positive uncertainty). Freeze the interface with a contract test every implementation must pass.

@@ -43,19 +43,24 @@ Any universe asset left with zero stored rows after a run exits non-zero.
 import argparse
 import logging
 import math
-import re
 import sqlite3
 import sys
 import time
 from collections.abc import Callable, Sequence
-from datetime import UTC, date, datetime, timedelta
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Final
 
 import pandas as pd
 
 from abe import constants, storage
-from abe.ingest.sources import PRICE_COLUMNS, SourceAdapter, YFinanceAdapter
+from abe.ingest.sources import (
+    DATE_KEY_RE,
+    PRICE_COLUMNS,
+    SourceAdapter,
+    YFinanceAdapter,
+    utc_now_iso,
+)
 
 __all__ = [
     "ADJ_REL_TOL",
@@ -78,8 +83,6 @@ adjustment-consistency check (and last-bar self-heal)."""
 ADJ_REL_TOL: Final[float] = 1e-4
 """Relative tolerance for the overlap adj_close comparison. Real adjustment
 steps (dividends) are ~0.2%+, comfortably above this; float noise is below."""
-
-_DATE_KEY_RE: Final[re.Pattern[str]] = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
 def stored_max_date(conn: sqlite3.Connection, asset: str) -> str | None:
@@ -132,10 +135,6 @@ def _none_if_nan(value: object) -> object:
     return None if pd.isna(value) else value
 
 
-def _utc_now_iso() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-
-
 def _validated_sorted(asset: str, frame: pd.DataFrame) -> pd.DataFrame:
     """Assert the adapter frame's contract (columns + date-key shape), sort ascending.
 
@@ -149,7 +148,7 @@ def _validated_sorted(asset: str, frame: pd.DataFrame) -> pd.DataFrame:
             f"expected exactly {list(PRICE_COLUMNS)}"
         )
     for date_key in frame.index:
-        if not isinstance(date_key, str) or not _DATE_KEY_RE.fullmatch(date_key):
+        if not isinstance(date_key, str) or not DATE_KEY_RE.fullmatch(date_key):
             raise ValueError(
                 f"date key {date_key!r} for {asset!r} is not ISO-8601 YYYY-MM-DD "
                 "(plan section 3 date-key rule)"
@@ -170,7 +169,7 @@ def _upsert_frame(
     Overlap rows re-upserted at or below ``new_after`` are updates by primary
     key and deliberately not counted as new.
     """
-    fetched_at = _utc_now_iso()
+    fetched_at = utc_now_iso()
     new_rows = 0
     for date_key, bar in frame.iterrows():
         row: dict[str, object] = {
