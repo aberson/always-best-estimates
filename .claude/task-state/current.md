@@ -5,15 +5,16 @@
 **Last written:** 2026-07-08T00:30:00Z
 
 ## WIP
-**Current:** Step 3: Price ingest — yfinance adapter + cache (#4)
-**Approach:** SourceAdapter protocol; YFinanceAdapter (auto_adjust=True, multi_level_index=False, progress=False + column-set assertion); CacheAdapter; incremental upsert with 429 backoff; backfill entrypoint
+**Current:** Step 4: FRED macro ingest (#5)
+**Approach:** macro.py — fredapi adapter for 6 daily series; startup key-probe → explicit degraded mode; '.'/''→NaN→None; append-only (series_id, obs_date, value, available_date, ingested_at_utc) with per-series release-lag shift
 
 ## Next Action
 /build-phase --plan plan.md --resume 3
 
 ## Completed
 - [814954d] Step 1 Scaffold + constants + observatory registration: PASS iter 2/3 (17 tests; #2 closed)
-- Step 2 SQLite storage module: PASS iter 2/3 (40 tests total; #3)
+- [0a4ea36] Step 2 SQLite storage module: PASS iter 2/3 (40 tests total; #3 closed)
+- Step 3 Price ingest yfinance+cache: PASS iter 2/3 (67 tests total; #4; real backfill in data/abe.db: SPY 8415/ACWI 4597/AGG 5728 rows; AGG 10y guard 1.37%>1%)
 
 ## Dead Ends
 (none yet)

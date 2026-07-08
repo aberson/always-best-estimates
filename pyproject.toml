@@ -56,11 +56,17 @@ module = [
     "fredapi.*",
     "scipy.*",
     "sklearn.*",
+    "pandas.*",
 ]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Default runs stay offline (plan section 8: fetch is split from recompute; no
+# accidental Yahoo hits). Select explicitly: `pytest -m network` / `-m realdb`.
+addopts = '-m "not network and not realdb"'
 markers = [
     "smoke: 60s real end-to-end smoke gate (no mocks; used from Step 9 on)",
+    "network: real-Yahoo tests; skip with a reason when offline; run via -m network",
+    "realdb: tests against the real backfilled db (ABE_REAL_DB or <root>/data/abe.db); skip with a reason when absent; run via -m realdb",
 ]

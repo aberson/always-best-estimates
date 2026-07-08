@@ -307,6 +307,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/ingest/{sources,prices}.py`, `scripts` backfill hook
 - **Done when:** backfill loads SPY/ACWI/AGG adjusted daily closes; a second run is a no-op (idempotency test); a network-off test serves full history from cache; a test asserts AGG trailing-10y annualized mean return > 1% (guards the price-only-vs-total-return bond bug).
 - **Depends on:** 2
+- **Status:** DONE (2026-07-07) — note: adapter uses `yf.Ticker().history(auto_adjust=True, actions=False, interval="1d")` + fail-loud config instead of `download()` (which swallows all exceptions incl. rate limits); `multi_level_index`/`progress` are download()-only kwargs. Incremental fetch uses a 10-day inclusive overlap window with adj_close consistency check → full refresh on backward-adjustment rebase.
 
 ### Step 4: FRED macro ingest (daily set)
 - **Problem:** `macro.py` — fredapi adapter for the daily set (DGS10, T10Y2Y, VIXCLS, DFF, BAMLH0A0HYM2, DTWEXBGS); startup key-probe (missing/invalid key → explicit degraded mode with a stable error code, never silent-empty); parse `'.'/''` → NaN; store `(series_id, obs_date, value, available_date, ingested_at)` append-only with per-series release-lag shift.
