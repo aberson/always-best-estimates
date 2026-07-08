@@ -5,8 +5,8 @@
 **Last written:** 2026-07-08T00:30:00Z
 
 ## WIP
-**Current:** Step 13: Minimal JEPA behind a toggle (#14)
-**Approach:** model/jepa.py (context encoder + EMA target encoder + predictor + VICReg + return head + ensemble σ, <500k params), model/train.py (offline training → checkpoint), EWMA↔JEPA config toggle through WorldModel interface, collapse instrumentation (per-dim embedding std, effective rank, hard-fail) + shuffled-target control. DEFAULT stays EWMA. Sigma must be H-day PREDICTIVE scale (Step 5 decision). Contract test frozen in tests/test_model_base.py must pass. NOTE: all NEW agents spawn with model=opus per operator instruction.
+**Current:** Step 14: JEPA walk-forward evaluation gate (#15)
+**Approach:** eval/walk_forward.py — pre-registered purged walk-forward eval of (μ,σ) THROUGH the production WorldModel interface, JEPA vs EWMA on identical windows (forecast MSE/IC + σ calibration coverage); committed report docs/eval/jepa-vs-ewma-<date>.md; records "EWMA remains default unless JEPA wins" with measured numbers. NOTE: all NEW agents spawn with model=opus per operator instruction. This is the LAST automated step before the phase halt (Step 15 = wait).
 
 ## Next Action
 /build-phase --plan plan.md --resume 3
@@ -23,7 +23,8 @@
 - Step 9 Smoke gate: PASS iter 2/3 (282 default + 1 smoke; #10 closed; real SMOKE PASS vs production db; -m smoke never skips; thread-join watchdog; structural no-network check)
 - Step 10 React UI: PASS iter 1+orch fixes (285 tests; #11 closed; 3 runtime reviewers CONFIRMED vs live Playwright evidence on real db; StaticFiles prod serving)
 - Step 11 Scheduler: PASS iter 2/3 (299 tests; #12 closed; structural single-flight; 202-at-START trigger; daily fetch ≥22:00 UTC; sweeps at startup+iteration; falsification-verified pins)
-- Step 12 Feature layer: PASS iter 1+orch fixes (350 tests; #13; statsmodels added; per-series merge_asof no-lookahead verified; RW anchor d≥0.35 honest deviation documented in plan Status; build output float64-pinned for JEPA)
+- Step 12 Feature layer: PASS iter 1+orch fixes (350 tests; #13 closed; statsmodels added; per-series merge_asof no-lookahead verified; RW anchor d≥0.35 honest; build output float64-pinned)
+- Step 13 Minimal JEPA: PASS iter 2/3 (381 tests; #14; λ_ret=0.05 SSL-primary; σ predictive-scale 6/6 seeds; μ drift-scale 8/8; format_version enforced; DEFAULT ewma pinned)
 
 ## Dead Ends
 (none yet)

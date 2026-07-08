@@ -48,6 +48,14 @@ the coalesced request's ``force`` flag is dropped — plan section 6). Because
 the pipeline executes on the executor thread, the event loop stays free: ALL
 routes, including ``/health``, respond during an active run.
 
+Model toggle (plan Step 13): lifespan resolves the forecaster from the
+environment via :func:`resolve_startup_model` — ``ABE_MODEL`` (``ewma`` default,
+or ``jepa``) and ``ABE_JEPA_CHECKPOINT`` (the checkpoint path for ``jepa``). No
+env => EWMA (the DEFAULT stays EWMA). An invalid ``jepa`` config (missing or
+malformed checkpoint) raises at startup rather than silently falling back to
+EWMA — the plan's fail-loud posture. An explicit ``scheduler_config`` (test
+seam) bypasses the env read and is used verbatim.
+
 Lifespan resolves the macro status ONCE via
 ``probe_fred_key(load_fred_api_key())`` (plan Step 4's startup key-probe):
 with no key configured this makes no network request and yields the explicit
@@ -67,8 +75,9 @@ starting uvicorn (a dist created afterwards needs a restart).
 """
 
 import json
+import os
 import sqlite3
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Annotated, Any, Final
@@ -79,16 +88,27 @@ from pydantic import BaseModel
 
 from abe import storage
 from abe.ingest.macro import load_fred_api_key, probe_fred_key
+from abe.model import load_model
+from abe.model.base import WorldModel
 from abe.scheduler import Scheduler, SchedulerConfig
 
 __all__ = [
+    "ABE_JEPA_CHECKPOINT_ENV",
+    "ABE_MODEL_ENV",
     "DEFAULT_HISTORY_LIMIT",
     "FRONTEND_DIST",
     "MAX_HISTORY_LIMIT",
     "TriggerRequest",
     "app",
     "create_app",
+    "resolve_startup_model",
 ]
+
+ABE_MODEL_ENV: Final[str] = "ABE_MODEL"
+"""Env var selecting the forecaster at startup: ``ewma`` (default) or ``jepa``."""
+
+ABE_JEPA_CHECKPOINT_ENV: Final[str] = "ABE_JEPA_CHECKPOINT"
+"""Env var giving the JEPA checkpoint path when ``ABE_MODEL=jepa`` (plan Step 13)."""
 
 DEFAULT_HISTORY_LIMIT: Final[int] = 20
 """History page size when the client sends no ``limit``."""
@@ -120,6 +140,23 @@ class TriggerRequest(BaseModel):
     """``POST /api/runs/trigger`` body; omitted body means ``force=False``."""
 
     force: bool = False
+
+
+def resolve_startup_model(env: Mapping[str, str] | None = None) -> WorldModel:
+    """Resolve the startup forecaster from the environment (plan Step 13 toggle).
+
+    Reads :data:`ABE_MODEL_ENV` (default ``"ewma"``) and, for ``jepa``,
+    :data:`ABE_JEPA_CHECKPOINT_ENV`, then delegates to
+    ``abe.model.load_model``. With NO env set this returns an
+    :class:`~abe.model.base.EWMABaseline` — the DEFAULT stays EWMA (pinned by
+    test). An invalid ``jepa`` config (missing/bad checkpoint) raises loudly at
+    startup rather than silently falling back to EWMA — the plan's fail-loud
+    posture. Directly testable (pass an ``env`` mapping).
+    """
+    environ = os.environ if env is None else env
+    spec = environ.get(ABE_MODEL_ENV, "ewma")
+    checkpoint = environ.get(ABE_JEPA_CHECKPOINT_ENV)
+    return load_model(spec, Path(checkpoint) if checkpoint else None)
 
 
 @contextmanager
@@ -221,6 +258,15 @@ def create_app(
         # exists — a failed startup can never leak open WAL handles (Windows
         # file locks would otherwise pin the db file).
         app.state.macro_status = probe_fred_key(load_fred_api_key())
+        # Model toggle (plan Step 13): with no explicit scheduler_config
+        # (production), resolve the forecaster from ABE_MODEL/ABE_JEPA_CHECKPOINT
+        # — default EWMA, fail-loud on an invalid jepa config (no silent EWMA
+        # fallback). An explicit scheduler_config (tests) is respected as-is.
+        resolved_config = (
+            SchedulerConfig(model=resolve_startup_model())
+            if scheduler_config is None
+            else scheduler_config
+        )
         # The scheduler owns THE writer connection + the single-worker
         # executor thread (Step 11): start() opens the connection ON that
         # thread, sweeps orphaned 'running' rows, then fires the immediate
@@ -229,7 +275,7 @@ def create_app(
         scheduler = Scheduler(
             resolved_path,
             macro_status=app.state.macro_status,
-            config=scheduler_config,
+            config=resolved_config,
         )
         await scheduler.start()
         app.state.scheduler = scheduler

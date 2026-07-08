@@ -407,6 +407,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/model/{jepa,train}.py`, checkpoint loader
 - **Done when:** training produces a checkpoint; the no-collapse check passes; a shuffled-target control run scores measurably worse than the real run (asserted in CI); the toggle routes `JEPAModel` through the production interface; DEFAULT stays EWMA.
 - **Depends on:** 12
+- **Status:** DONE (2026-07-08) — ensemble K=3, 13.9k params/seed (41.8k total); return head at λ_ret=0.05 (SSL-primary per §4/LeCun §4.5.2); σ = sqrt(purged-holdout residual_var + ensemble μ-disagreement) on the frozen predictive H-day scale (iid ratio 0.85–1.07×, 6/6 seeds); collapse hard-fail: per-dim std median ≥0.1 + effective rank ≥1.5 (total-collapse floor; Step 14 is the quality gate); checkpoint = .pt (weights_only-safe) + .meta.json sidecar with enforced format_version; model_version = jepa:<8hex> (per-torch-build hash). Toggle: ABE_MODEL/ABE_JEPA_CHECKPOINT env at startup, DEFAULT ewma pinned, invalid jepa config fails loud. Contract passed incl. μ drift-scale (0.97–1.02× D·H, 8/8 seeds) + shuffled-target control (8/8 seeds).
 
 ### Step 14: JEPA walk-forward evaluation gate
 - **Problem:** `eval/walk_forward.py` — a pre-registered purged walk-forward eval of `(μ, σ)` produced **through the production `WorldModel` interface**, JEPA vs EWMA on identical windows (forecast MSE/IC + σ calibration coverage); writes a committed eval report and records the promotion decision.
