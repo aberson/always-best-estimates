@@ -72,6 +72,12 @@ body {
   font-size: 0.9rem;
 }
 
+.run-freshness {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
 .run-header-actions {
   display: flex;
   align-items: center;

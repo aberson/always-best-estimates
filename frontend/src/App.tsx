@@ -126,11 +126,31 @@ export default function App() {
             : null
       : null;
 
+  // Freshness data-recency, folded into the top bar (no separate card).
+  const freshnessStage = latest?.stages.find((stage) => stage.stage === "freshness");
+  const freshnessDetail =
+    freshnessStage && typeof freshnessStage.detail === "object" && freshnessStage.detail !== null
+      ? (freshnessStage.detail as Record<string, unknown>)
+      : null;
+  const dataMaxDate =
+    freshnessDetail && typeof freshnessDetail["data_max_date"] === "string"
+      ? freshnessDetail["data_max_date"]
+      : null;
+  const dataFetchedAt =
+    freshnessDetail && typeof freshnessDetail["data_fetched_at"] === "string"
+      ? freshnessDetail["data_fetched_at"]
+      : null;
+
   return (
     <main className="app">
       <header className="app-head">
         <h1>always-best-estimates</h1>
-        <RunHeader run={latest?.run ?? null} onTriggered={handleTriggered} />
+        <RunHeader
+          run={latest?.run ?? null}
+          onTriggered={handleTriggered}
+          dataMaxDate={dataMaxDate}
+          dataFetchedAt={dataFetchedAt}
+        />
       </header>
 
       {unreachable !== null ? (
@@ -144,9 +164,11 @@ export default function App() {
       ) : null}
       {latest !== null ? (
         <div className="cards">
-          {latest.stages.map((stage) => (
-            <StageCard key={stage.stage} stage={stage} explanations={explanations} />
-          ))}
+          {latest.stages
+            .filter((stage) => stage.stage !== "freshness")
+            .map((stage) => (
+              <StageCard key={stage.stage} stage={stage} explanations={explanations} />
+            ))}
         </div>
       ) : null}
     </main>

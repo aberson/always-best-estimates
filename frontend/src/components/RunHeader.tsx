@@ -39,14 +39,32 @@ function ageLabel(finishedAtUtc: string | null, nowMs: number): string {
   return `${days}d ${hours % 24}h ago`;
 }
 
+/** "2026-07-08T00:02:06Z" -> "2026-07-08 00:02Z" (compact, minute precision). */
+function fmtFetched(iso: string | null): string | null {
+  if (iso === null) {
+    return null;
+  }
+  const [date, time] = iso.split("T");
+  return time !== undefined ? `${date} ${time.slice(0, 5)}Z` : date;
+}
+
 interface RunHeaderProps {
   /** The latest ok run, or null when none exists yet (empty state). */
   run: RunInfo | null;
   /** Called with the trigger response so the App re-polls immediately. */
   onTriggered: (result: TriggerResponse) => void;
+  /** Latest data date (freshness stage), folded in here instead of a card. */
+  dataMaxDate?: string | null;
+  /** Fetch watermark (freshness stage) — shown compact next to the date. */
+  dataFetchedAt?: string | null;
 }
 
-export default function RunHeader({ run, onTriggered }: RunHeaderProps) {
+export default function RunHeader({
+  run,
+  onTriggered,
+  dataMaxDate = null,
+  dataFetchedAt = null,
+}: RunHeaderProps) {
   const [nowMs, setNowMs] = useState<number>(() => Date.now());
   const [busy, setBusy] = useState(false);
   const [triggerError, setTriggerError] = useState<string | null>(null);
@@ -84,6 +102,12 @@ export default function RunHeader({ run, onTriggered }: RunHeaderProps) {
         ) : (
           <span className="run-meta">no successful run yet</span>
         )}
+        {dataMaxDate !== null ? (
+          <span className="run-freshness" title={dataFetchedAt ?? undefined}>
+            data through {dataMaxDate}
+            {fmtFetched(dataFetchedAt) !== null ? ` · fetched ${fmtFetched(dataFetchedAt)}` : ""}
+          </span>
+        ) : null}
       </div>
       <div className="run-header-actions">
         {triggerError !== null ? <span className="trigger-error">{triggerError}</span> : null}
