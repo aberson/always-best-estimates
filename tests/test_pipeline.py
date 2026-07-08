@@ -288,6 +288,11 @@ def test_transparency_fields_land_in_stage_details(writer: sqlite3.Connection) -
     assert set(blend["view"]) == set(UNIVERSE)  # EWMA forecasts every asset
     assert all(isinstance(v, float) for v in blend["prior"].values())
     assert set(blend["posterior_mu"]) == set(UNIVERSE)  # existing key intact
+    # covariance window: the common (inner-join) history the covariance is fit on.
+    cov_window = blend["covariance_window"]
+    assert set(cov_window) == {"start", "end", "bars"}
+    assert isinstance(cov_window["bars"], int) and cov_window["bars"] > 0
+    assert cov_window["start"] <= cov_window["end"]
 
     # optimize: objective block sourced from the REAL constants (not hardcoded).
     optimize = by_stage["optimize"]

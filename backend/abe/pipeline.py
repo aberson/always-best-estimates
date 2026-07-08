@@ -569,6 +569,15 @@ def _stage_blend(ctx: _RunContext) -> tuple[str, dict[str, object]]:
         },
         "confidences": diag["confidences"],
         "tilt": diag["tilt"],
+        # Covariance is fit on the COMMON history: the inner join above aligns
+        # the varying-length per-asset series to the window all assets share,
+        # so THIS is where the truncation happens (ACWI's 2008 inception is the
+        # binding start). Surfaced so the card can say so.
+        "covariance_window": {
+            "start": str(returns_frame.index[0]),
+            "end": str(returns_frame.index[-1]),
+            "bars": int(len(returns_frame)),
+        },
     }
     return ("ok", detail)
 

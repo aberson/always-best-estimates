@@ -203,6 +203,12 @@ function renderIngest(detail: JsonRecord): ReactNode {
   if (prices === null || macro === null) {
     return null;
   }
+  // Series start on different dates; the latest first date is the common
+  // window start that the downstream covariance step aligns everything to.
+  const firstDates = Object.values(prices)
+    .map((info) => asString((asRecord(info) ?? {})["first_date"]))
+    .filter((date): date is string => date !== null);
+  const commonStart = firstDates.length > 0 ? firstDates.reduce((a, b) => (a > b ? a : b)) : null;
   return (
     <>
       <table className="detail-table">
@@ -235,6 +241,12 @@ function renderIngest(detail: JsonRecord): ReactNode {
         <span className="badge">served from: {scalar(detail["source"])}</span>
         {renderMacroBadge(macro)}
       </div>
+      {commonStart !== null ? (
+        <p className="caveat">
+          Histories differ in length; the common price overlap starts {commonStart}. Covariance is
+          fit on that overlap &mdash; BL Blend shows the exact (returns) window.
+        </p>
+      ) : null}
     </>
   );
 }
@@ -248,39 +260,48 @@ function renderFeatures(detail: JsonRecord): ReactNode {
   if (latest === null || names === null) {
     return null;
   }
+  // Window info moves below the table (BL-Blend style) to keep headers short.
+  const windowNote = names
+    .map((name) => {
+      const win = asString(windows[name]);
+      return win !== null ? `${name} over ${win}` : null;
+    })
+    .filter((entry): entry is string => entry !== null)
+    .join("; ");
   return (
-    <table className="detail-table">
-      <thead>
-        <tr>
-          <th>asset</th>
-          <th>date</th>
-          {names.map((name) => {
-            const win = asString(windows[name]);
+    <>
+      <table className="detail-table">
+        <thead>
+          <tr>
+            <th>asset</th>
+            <th>date</th>
+            {names.map((name) => (
+              <th key={name}>{name}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {Object.entries(latest).map(([asset, info]) => {
+            const record = asRecord(info) ?? {};
             return (
-              <th key={name}>
-                {name}
-                {win !== null ? ` (${win})` : ""}
-              </th>
+              <tr key={asset}>
+                <th>{asset}</th>
+                <td>{scalar(record["date"])}</td>
+                {names.map((name) => {
+                  const value = asNumber(record[name]);
+                  return (
+                    <td key={name}>
+                      {value !== null ? value.toFixed(5) : scalar(record[name])}
+                    </td>
+                  );
+                })}
+              </tr>
             );
           })}
-        </tr>
-      </thead>
-      <tbody>
-        {Object.entries(latest).map(([asset, info]) => {
-          const record = asRecord(info) ?? {};
-          return (
-            <tr key={asset}>
-              <th>{asset}</th>
-              <td>{scalar(record["date"])}</td>
-              {names.map((name) => {
-                const value = asNumber(record[name]);
-                return <td key={name}>{value !== null ? value.toFixed(5) : scalar(record[name])}</td>;
-              })}
-            </tr>
-          );
-        })}
-      </tbody>
-    </table>
+        </tbody>
+      </table>
+      {windowNote !== "" ? <p className="caveat">{windowNote}.</p> : null}
+    </>
   );
 }
 
@@ -333,6 +354,9 @@ function renderBlend(detail: JsonRecord): ReactNode {
   // may be absent on rows written before this stage was enriched.
   const prior = asRecord(detail["prior"]);
   const view = asRecord(detail["view"]);
+  // The covariance is fit on the common (inner-join) history — this is where
+  // the differing per-asset histories get aligned/truncated.
+  const cov = asRecord(detail["covariance_window"]);
   return (
     <>
       <table className="detail-table">
@@ -367,6 +391,14 @@ function renderBlend(detail: JsonRecord): ReactNode {
         All annualized. View Q is the Forecast annualized; the posterior blends the
         market-equilibrium prior &pi; toward Q, weighted by each view&rsquo;s confidence.
       </p>
+      {cov !== null ? (
+        <p className="caveat">
+          Covariance uses the common return history {scalar(cov["start"])} &rarr;{" "}
+          {scalar(cov["end"])} ({scalar(cov["bars"])} bars) &mdash; where the differing per-asset
+          histories are aligned (one bar after the common price start, since returns drop the
+          first bar).
+        </p>
+      ) : null}
     </>
   );
 }
@@ -376,19 +408,13 @@ function renderOptimize(detail: JsonRecord): ReactNode {
   if (weights === null) {
     return null;
   }
-  const objective = asRecord(detail["objective"]);
-  const objWMax = objective !== null ? asNumber(objective["w_max"]) : null;
-  const constraints = objective !== null && Array.isArray(objective["constraints"])
-    ? (objective["constraints"] as unknown[]).map(String)
-    : [];
-  const turnover = asRecord(detail["turnover"]) ?? {};
-  const prevWeights = asRecord(detail["prev_weights"]);
+  // The prev/turnover table + the objective now live in the expander (see
+  // hiddenExtra + the mvu_objective explanation). The visible card is just the
+  // weights, the method, and any edge-case flags. Solver STATUS is surfaced
+  // only when it is not a clean "optimal" (an inaccurate solve is worth seeing).
+  const status = asString(detail["solver_status"]);
   const relaxed = detail["relaxed_turnover"] === true;
   const coldStart = detail["cold_start"] === true;
-  const totalTurnover = Object.values(turnover)
-    .map(asNumber)
-    .filter((value): value is number => value !== null)
-    .reduce((sum, value) => sum + value, 0);
   return (
     <>
       {/* THE WEIGHTS: the product of the whole pipeline, big and prominent. */}
@@ -405,6 +431,57 @@ function renderOptimize(detail: JsonRecord): ReactNode {
           );
         })}
       </div>
+      <div className="badge-row">
+        <span className="badge">solver: Mean-variance-utility optimization</span>
+        {status !== null && status !== "optimal" ? (
+          <span className="badge badge-amber">solver status: {status}</span>
+        ) : null}
+        {relaxed ? <span className="badge badge-amber">turnover constraint relaxed</span> : null}
+        {coldStart ? (
+          <span className="badge badge-amber">cold start (no previous weights)</span>
+        ) : null}
+      </div>
+      <p className="caveat">{OVERLAP_CAVEAT}</p>
+    </>
+  );
+}
+
+/** Extra content shown INSIDE a card's expander, beyond the generic
+ *  explanation list. Optimize moves its per-asset prev/turnover table here so
+ *  the visible card stays lean (the aggregate is ~always 0 on the 5-min loop). */
+function hiddenExtra(stage: StageRow): ReactNode {
+  if (stage.stage !== "optimize") {
+    return null;
+  }
+  const detail = asRecord(stage.detail);
+  if (detail === null) {
+    return null;
+  }
+  const weights = asRecord(detail["weights"]);
+  if (weights === null) {
+    return null;
+  }
+  // Live objective parameters, read from the emitted detail["objective"] (built
+  // from the real DELTA/GAMMA_TC/W_MAX constants) — the authoritative display,
+  // so a future constant change can't leave the UI showing stale values.
+  const objective = asRecord(detail["objective"]);
+  const objWMax = objective !== null ? asNumber(objective["w_max"]) : null;
+  const constraints =
+    objective !== null && Array.isArray(objective["constraints"])
+      ? (objective["constraints"] as unknown[]).map(String)
+      : [];
+  const prevWeights = asRecord(detail["prev_weights"]);
+  const turnover = asRecord(detail["turnover"]) ?? {};
+  return (
+    <>
+      {objective !== null ? (
+        <p className="explain-desc">
+          This run: risk aversion &delta; = {scalar(objective["delta"])}, turnover penalty &gamma;{" "}
+          = {scalar(objective["gamma_tc"])}, max weight ={" "}
+          {objWMax !== null ? pct(objWMax, 0) : scalar(objective["w_max"])}
+          {constraints.length > 0 ? `; subject to ${constraints.join("; ")}` : ""}
+        </p>
+      ) : null}
       <table className="detail-table">
         <thead>
           <tr>
@@ -427,26 +504,6 @@ function renderOptimize(detail: JsonRecord): ReactNode {
           })}
         </tbody>
       </table>
-      {objective !== null ? (
-        <div className="objective">
-          <code className="objective-form">{scalar(objective["form"])}</code>
-          <p className="muted">
-            risk aversion &delta; = {scalar(objective["delta"])}, turnover penalty &gamma; ={" "}
-            {scalar(objective["gamma_tc"])}, max weight ={" "}
-            {objWMax !== null ? pct(objWMax, 0) : scalar(objective["w_max"])}
-          </p>
-          {constraints.length > 0 ? (
-            <p className="muted">subject to: {constraints.join("; ")}</p>
-          ) : null}
-        </div>
-      ) : null}
-      <div className="badge-row">
-        <span className="badge">total turnover: {pct(totalTurnover, 2)}</span>
-        <span className="badge">solver: {scalar(detail["solver_status"])}</span>
-        {relaxed ? <span className="badge badge-amber">turnover constraint relaxed</span> : null}
-        {coldStart ? <span className="badge badge-amber">cold start (no previous weights)</span> : null}
-      </div>
-      <p className="caveat">{OVERLAP_CAVEAT}</p>
     </>
   );
 }
@@ -510,6 +567,8 @@ export default function StageCard({
   const explainEntries = (STAGE_EXPLAIN_KEYS[stage.stage] ?? [])
     .map((key) => (explanations ? explanations[key] : undefined))
     .filter((entry): entry is Explanation => entry !== undefined);
+  const extra = hiddenExtra(stage);
+  const hasHidden = explainEntries.length > 0 || extra !== null;
   return (
     <section className={`card card-${stage.status}`}>
       <header className="card-head">
@@ -520,7 +579,7 @@ export default function StageCard({
         </span>
       </header>
       <div className="card-body">{detailBody(stage)}</div>
-      {explainEntries.length > 0 ? (
+      {hasHidden ? (
         <div className="explain">
           <button
             type="button"
@@ -531,18 +590,23 @@ export default function StageCard({
             {showExplain ? "▾ hide how this is computed" : "▸ how is this computed?"}
           </button>
           {showExplain ? (
-            <dl className="explain-list">
-              {explainEntries.map((entry) => (
-                <div key={entry.label} className="explain-item">
-                  <dt>{entry.label}</dt>
-                  <dd>
-                    <code>{entry.formula}</code>
-                    <span className="explain-desc">{entry.description}</span>
-                    <span className="explain-example">e.g. {entry.example}</span>
-                  </dd>
-                </div>
-              ))}
-            </dl>
+            <>
+              {explainEntries.length > 0 ? (
+                <dl className="explain-list">
+                  {explainEntries.map((entry) => (
+                    <div key={entry.label} className="explain-item">
+                      <dt>{entry.label}</dt>
+                      <dd>
+                        <code>{entry.formula}</code>
+                        <span className="explain-desc">{entry.description}</span>
+                        <span className="explain-example">e.g. {entry.example}</span>
+                      </dd>
+                    </div>
+                  ))}
+                </dl>
+              ) : null}
+              {extra}
+            </>
           ) : null}
         </div>
       ) : null}
