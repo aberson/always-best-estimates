@@ -337,6 +337,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/blend/{covariance,confidence,black_litterman}.py`
 - **Done when:** confidence boundary tests (σ→0 ⇒ c clamps to 0.95, σ large ⇒ c→~0.02); LW returns PSD; annualized SPY vol lands in 0.05–0.60 (units test); a golden-value test reproduces an Idzorek-paper Table-6/7 example within tolerance; `pyportfolioopt==1.6.0` import smoke test.
 - **Depends on:** 5
+- **Status:** DONE (2026-07-08) — golden pins: Idzorek Table 6 col 2 posterior (atol 1e-4, max err 6.4e-5) + Table 4 view variances + p.15 Ω diag; idzorek-ω closed form + tilt∝c pinned separately. Decisions: confidence computed from RAW H-day (μ,σ) pair (annualize-first would inflate z by √12); Q annualized ×12 at the bl_blend boundary only; rf hard-rejected unless exactly 0.0 (V1 excess-return convention).
 
 ### Step 7: cvxpy mean-variance-utility optimizer
 - **Problem:** `optimize/mvu.py` — `maximize(mu@w − 0.5·δ·sum_squares(chol.T@w) − γ_tc·norm1(w − w_prev))` s.t. `sum(w)==1, 0≤w≤W_MAX`; `chol = cholesky(annualized Σ_post)`; solver `CLARABEL`; require status ∈ {OPTIMAL, OPTIMAL_INACCURATE}; clip `w<1e-8→0` + renormalize; cold-start drops turnover; INFEASIBLE retries without turnover and flags `relaxed_turnover`.
