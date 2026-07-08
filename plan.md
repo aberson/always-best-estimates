@@ -347,6 +347,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/optimize/mvu.py`
 - **Done when:** weights sum to 1 with all constraints test-asserted; cold-start (no `w_prev`) test passes; a deliberately near-singular Σ flows through without crashing; a ±10bp μ-perturbation moves max weight below a declared bound (stability test).
 - **Depends on:** 6
+- **Status:** DONE (2026-07-08) — γ_tc default 0.002 (no-trade band: ±10bp noise never trades — measured zero trades at corr 0.999; percent-scale views clear the band — anchored both directions). Stability bounds: 0.25 cold-start (measured 0.158; corner-flip is 0.30) / 0.01 with w_prev+γ (measured ≤2e-7). W_MKT inversion anchor certifies δ-sharing + quadratic-form orientation. Renormalization is float-exact under builtin sum; box overshoot scales with solver status (ppb on OPTIMAL, ~1e-4 on OPTIMAL_INACCURATE — downstream gates must key to status).
 
 ### Step 8: Pipeline orchestrator + JSON API + run ledger
 - **Problem:** `pipeline.py` (sync `run_pipeline(force)` wiring freshness-gate → ingest(cache) → features → WorldModel → blend → optimize → persist, each writing a `run_stages` row) and `api.py` (routes in §6, reads via short-lived read-only connections).
