@@ -367,6 +367,7 @@ into Automated + Manual subsections.
 - **Produces:** `scripts/smoke.py`, a `pytest` smoke marker
 - **Done when:** the smoke script exits 0; every stage card is `ok`; weights sum to 1. (Business-logic quality is out of scope — this gate only proves the pipeline completes one real cycle without crashing.)
 - **Depends on:** 8
+- **Status:** DONE (2026-07-08) — real smoke passes against the production db (all 6 stages ok, weights SPY 0.454/ACWI 0.546/AGG 0.000, 0.4s). Exit contract 0/1/3 (pass/failure/precondition); `pytest -m smoke` NEVER skips (missing db = pytest.fail with backfill hint — no vacuous green); real thread-join watchdog (120s); structural zero-network check (yfinance/fredapi absent from sys.modules post-run). addopts deselects smoke/network/realdb from the default suite (tomllib meta-guard test pins this).
 
 ### Step 10: React UI — one card per stage
 - **Problem:** React cards for each pipeline stage (latest prices, features, per-asset forecast, BL posterior, final weights) reading `run_stages`; a refresh button (`POST /api/runs/trigger`); `error`/`skipped` first-class card states; a header showing "last successful run: <age>". The optimizer card states the SPY/ACWI overlap caveat.

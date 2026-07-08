@@ -66,13 +66,18 @@ testpaths = ["tests"]
 # --import-mode=importlib): the pinned frozen-WorldModel contract import
 # (`from test_model_base import assert_worldmodel_contract`, reused by Step
 # 13's JEPA suite) and the shared synthetic-price helpers (`from seeding
-# import ...`, used by test_pipeline.py + test_api.py).
-pythonpath = ["tests"]
+# import ...`, used by test_pipeline.py + test_api.py). scripts/ on sys.path
+# so tests/test_smoke.py can import the Step 9 smoke core (`from smoke
+# import run_smoke`). NOTE: tests/ precedes scripts/, so a future
+# tests/smoke.py would SHADOW scripts/smoke.py — don't create one.
+pythonpath = ["tests", "scripts"]
 # Default runs stay offline (plan section 8: fetch is split from recompute; no
-# accidental Yahoo hits). Select explicitly: `pytest -m network` / `-m realdb`.
-addopts = '-m "not network and not realdb"'
+# accidental Yahoo hits) and off the real db (smoke hits it and runs a real
+# solve). Select explicitly: `pytest -m network` / `-m realdb` / `-m smoke`
+# (a CLI -m overrides addopts).
+addopts = '-m "not network and not realdb and not smoke"'
 markers = [
-    "smoke: 60s real end-to-end smoke gate (no mocks; used from Step 9 on)",
+    "smoke: 60s real end-to-end smoke gate against the real db (no mocks; run via -m smoke; FAILS — never skips — when the db is absent, so the gate can't pass vacuously)",
     "network: real-Yahoo tests; skip with a reason when offline; run via -m network",
     "realdb: tests against the real backfilled db (ABE_REAL_DB or <root>/data/abe.db); skip with a reason when absent; run via -m realdb",
 ]
