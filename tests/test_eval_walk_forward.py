@@ -31,6 +31,7 @@ from conftest import ci_config
 from seeding import seed_prices
 
 from abe.afml.purged_cv import purged_walk_forward_splits, validate_no_leakage
+from abe.calc import log_returns
 from abe.constants import HORIZON_BARS, UNIVERSE
 from abe.eval.walk_forward import (
     CALIBRATION_Z,
@@ -49,7 +50,6 @@ from abe.eval.walk_forward import (
     render_report_markdown,
     run_walk_forward_eval,
 )
-from abe.features.basic import log_returns
 from abe.features.build import build_features
 from abe.model.base import EWMABaseline, Forecast, WorldModel
 from abe.model.jepa import JEPAConfig

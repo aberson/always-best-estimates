@@ -108,8 +108,8 @@ import torch
 from torch import Tensor, nn
 
 from abe.afml.fracdiff import FracDiffParams
+from abe.calc import LOG_RETURN_COLUMN, non_finite_summary
 from abe.constants import HORIZON_BARS
-from abe.features.basic import LOG_RETURN_COLUMN, non_finite_summary
 from abe.model.base import Forecast
 
 __all__ = [

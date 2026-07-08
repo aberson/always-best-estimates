@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 
 from abe.afml.fracdiff import FracDiffParams
-from abe.features.basic import LOG_RETURN_COLUMN, REALIZED_VOL_COLUMN, log_returns, realized_vol
+from abe.calc import LOG_RETURN_COLUMN, REALIZED_VOL_COLUMN, log_returns, realized_vol
 from abe.features.build import (
     FEATURE_NAME_SEP,
     build_features,

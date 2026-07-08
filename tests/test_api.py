@@ -266,6 +266,34 @@ def test_unknown_run_stages_404(client: TestClient) -> None:
     assert response.status_code == 404
 
 
+def test_explain_endpoint_serves_calculation_registry(client: TestClient) -> None:
+    """GET /api/explain returns the static calculation registry (Track 1):
+    a legible formula + worked example per quantity the stage cards read.
+    Read-only, no run state needed."""
+    response = client.get("/api/explain")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "explanations" in payload
+    explanations = payload["explanations"]
+    # Every quantity a card displays has an entry.
+    for key in (
+        "log_return",
+        "realized_vol",
+        "ewma_mu",
+        "forecast_sigma",
+        "bl_prior",
+        "bl_view",
+        "bl_confidence",
+        "bl_posterior",
+        "mvu_objective",
+    ):
+        assert key in explanations, key
+    # Each entry carries exactly the documented fields.
+    entry = explanations["bl_posterior"]
+    assert set(entry) == {"label", "formula", "description", "example", "unit", "window"}
+    assert entry["label"] and entry["formula"] and entry["example"]
+
+
 def test_history_startup_run_and_limit_validation(client: TestClient) -> None:
     history = client.get("/api/history").json()["runs"]
     assert [run["run_id"] for run in history] == [STARTUP_RUN_ID]

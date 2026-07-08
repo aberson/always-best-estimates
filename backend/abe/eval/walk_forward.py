@@ -96,8 +96,8 @@ import pandas as pd
 from scipy.stats import spearmanr
 
 from abe.afml.purged_cv import purged_walk_forward_splits, validate_no_leakage
+from abe.calc import LOG_RETURN_COLUMN, log_returns
 from abe.constants import HORIZON_BARS, UNIVERSE
-from abe.features.basic import LOG_RETURN_COLUMN, log_returns
 from abe.features.build import build_features
 from abe.ingest.sources import CacheAdapter
 from abe.model.base import EWMABaseline, Forecast, WorldModel

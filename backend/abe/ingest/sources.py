@@ -44,6 +44,7 @@ __all__ = [
     "DATE_FORMAT",
     "DATE_KEY_RE",
     "PRICE_COLUMNS",
+    "PRICE_PROVIDER_LABEL",
     "CacheAdapter",
     "SourceAdapter",
     "YFinanceAdapter",
@@ -53,6 +54,13 @@ __all__ = [
 
 PRICE_COLUMNS: Final[tuple[str, ...]] = ("open", "high", "low", "close", "adj_close", "volume")
 """The fixed normalized column set every adapter returns (matches the prices table)."""
+
+PRICE_PROVIDER_LABEL: Final[str] = "Yahoo Finance (yfinance)"
+"""Human-readable provenance of price data — the ultimate upstream source
+(prices come from Yahoo Finance via yfinance; the ``CacheAdapter`` only
+re-serves what ``YFinanceAdapter`` originally fetched). Surfaced on the ingest
+stage card; the pipeline IMPORTS this label rather than inlining the string
+(one source of truth)."""
 
 _RAW_YFINANCE_COLUMNS: Final[frozenset[str]] = frozenset({"Open", "High", "Low", "Close", "Volume"})
 """Exact raw column set ``Ticker.history(auto_adjust=True, actions=False)`` returns."""

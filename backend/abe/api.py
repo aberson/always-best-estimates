@@ -5,6 +5,9 @@ uvicorn target: ``abe.api:app`` (127.0.0.1:8140, single worker, no --reload).
 Routes (plan section 6):
 
 - ``GET /health`` -> ``{"status": "ok"}`` (liveness).
+- ``GET /api/explain`` -> ``{"explanations": {key: {label, formula,
+  description, example, unit, window}}}`` — the static calculation registry
+  (``abe.calc.EXPLANATIONS``); read-only, no DB, so the UI can annotate cards.
 - ``GET /api/runs/latest`` -> the latest ok run + its stages (plan section 3's
   "Latest" definition: ``MAX(run_id) WHERE status='ok'`` via
   ``storage.latest_ok_run_id``); 404 JSON (``{"detail": ...}``) when no run
@@ -87,6 +90,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from abe import storage
+from abe.calc import EXPLANATIONS
 from abe.ingest.macro import load_fred_api_key, probe_fred_key
 from abe.model import load_model
 from abe.model.base import WorldModel
@@ -290,6 +294,15 @@ def create_app(
     def health() -> dict[str, str]:
         """Liveness probe."""
         return {"status": "ok"}
+
+    @app.get("/api/explain")
+    def explain() -> dict[str, Any]:
+        """The calculation registry (Track 1 transparency pass): a legible
+        formula + worked example per quantity the stage cards display, built
+        from :data:`abe.calc.EXPLANATIONS`. Read-only and static — no DB, no
+        run state — so the UI can annotate any card without a per-run round
+        trip."""
+        return {"explanations": {key: exp.payload() for key, exp in EXPLANATIONS.items()}}
 
     @app.get("/api/runs/latest")
     def runs_latest() -> dict[str, Any]:

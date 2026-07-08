@@ -44,11 +44,10 @@ import pandas as pd
 import pytest
 
 from abe import constants
-from abe.blend.black_litterman import H_TO_ANNUAL, BLResult, bl_blend
-from abe.blend.confidence import idzorek_confidence
+from abe.blend.black_litterman import BLResult, bl_blend
 from abe.blend.covariance import ledoit_wolf_sigma
+from abe.calc import H_TO_ANNUAL, LOG_RETURN_COLUMN, idzorek_confidence
 from abe.constants import DELTA, HORIZON_BARS, TAU, TRADING_DAYS, UNIVERSE, W_MKT
-from abe.features.basic import LOG_RETURN_COLUMN
 from abe.model.base import EWMABaseline, Forecast
 
 # --------------------------------------------------------------------------- #

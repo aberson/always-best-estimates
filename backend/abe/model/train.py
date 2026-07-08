@@ -45,8 +45,8 @@ import torch.nn.functional as F  # noqa: N812 — the conventional torch alias
 
 from abe.afml.fracdiff import FracDiffParams
 from abe.afml.purged_cv import purged_walk_forward_splits, validate_no_leakage
+from abe.calc import log_returns
 from abe.constants import UNIVERSE
-from abe.features.basic import log_returns
 from abe.features.build import build_features, feature_column
 from abe.ingest.sources import CacheAdapter
 from abe.model.jepa import (

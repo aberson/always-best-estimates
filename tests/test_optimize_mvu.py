@@ -41,8 +41,8 @@ import pytest
 from abe import constants
 from abe.blend.black_litterman import bl_blend
 from abe.blend.covariance import ledoit_wolf_sigma
+from abe.calc import LOG_RETURN_COLUMN
 from abe.constants import DELTA, UNIVERSE, W_MAX, W_MKT
-from abe.features.basic import LOG_RETURN_COLUMN
 from abe.model.base import EWMABaseline
 from abe.optimize.mvu import (
     GAMMA_TC,

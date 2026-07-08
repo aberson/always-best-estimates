@@ -30,8 +30,8 @@ import numpy as np
 import pandas as pd
 from pypfopt.risk_models import CovarianceShrinkage
 
+from abe.calc import non_finite_summary
 from abe.constants import TRADING_DAYS
-from abe.features.basic import non_finite_summary
 
 __all__ = [
     "MIN_LW_ROWS",
@@ -54,7 +54,7 @@ def ledoit_wolf_sigma(returns: pd.DataFrame) -> pd.DataFrame:
     """Annualized Ledoit-Wolf covariance of a daily log-returns frame.
 
     Input: ``returns`` with one column per asset and an ascending ISO-date
-    index — the shape ``features.basic.log_returns`` emits per asset, joined
+    index — the shape ``abe.calc.log_returns`` emits per asset, joined
     column-wise. Output: the shrunk covariance annualized by ``TRADING_DAYS``
     (the ``CovarianceShrinkage(frequency=...)`` path), as a DataFrame labeled
     exactly like ``returns.columns`` (order preserved), defensively

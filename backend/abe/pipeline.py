@@ -90,19 +90,27 @@ Stage payloads (``detail_json`` — the UI card contract)
   ``last_ok_data_max_date``, ``last_ok_data_fetched_at``, ``force``.
 - ``ingest``: per-asset row counts + date ranges (served from SQLite via
   ``CacheAdapter`` — NO network on this path; the daily fetch job is Step 11),
-  plus the macro block ``{enabled, code, message}`` — degraded mode
-  (``MACRO_DISABLED_*``) surfaces here as a card fact, NOT an error.
-- ``features``: feature names + per-asset latest date/values (rows persisted
-  for the LATEST bar only in V1 — the card shows current features).
+  ``source`` (who served this run) + ``price_provider`` (the human-readable
+  ultimate upstream, ``PRICE_PROVIDER_LABEL``), plus the macro block
+  ``{enabled, code, message}`` — degraded mode (``MACRO_DISABLED_*``) surfaces
+  here as a card fact, NOT an error.
+- ``features``: feature names + a ``windows`` map (per-feature lookback, e.g.
+  ``realized_vol`` = ``{HORIZON_BARS} days, annualized``) + per-asset latest
+  date/values (rows persisted for the LATEST bar only in V1 — the card shows
+  current features).
 - ``forecast``: ``model_version``, ``horizon_days``, per-asset ``(mu, sigma)``.
-- ``blend``: posterior mu AND posterior sigma per asset + confidences + tilt
-  (the card can show mu ± sigma). Each ``bl_posteriors`` row stores the
-  per-asset slice of ``BLResult.diagnostics`` in its own ``detail_json``;
-  ``posterior_sigma`` is ``sqrt(sigma_post[asset, asset])`` — the annualized
-  posterior return std.
+- ``blend``: the equilibrium ``prior`` (pi, all assets) and forecast ``view``
+  (Q, viewed assets) surfaced from ``BLResult.diagnostics`` (no new math),
+  then posterior mu AND posterior sigma per asset + confidences + tilt (the
+  card shows prior -> view -> posterior, mu ± sigma). Each ``bl_posteriors``
+  row stores the per-asset slice of ``BLResult.diagnostics`` in its own
+  ``detail_json``; ``posterior_sigma`` is ``sqrt(sigma_post[asset, asset])`` —
+  the annualized posterior return std.
 - ``optimize``: weights, prev_weights, turnover, ``relaxed_turnover``, solver
-  status, cold_start. ``w_prev`` is the last persisted allocation of the
-  latest ok run (:func:`load_last_weights`); ``None`` = cold start.
+  status, cold_start, plus an ``objective`` block (the solved form + the real
+  ``delta``/``gamma_tc``/``w_max`` constants + constraints) for the card.
+  ``w_prev`` is the last persisted allocation of the latest ok run
+  (:func:`load_last_weights`); ``None`` = cold start.
 
 Insufficient history (< ``MIN_LW_ROWS`` daily returns for Ledoit-Wolf, or
 < ``MIN_HISTORY_BARS`` for the EWMA) is an ordinary stage error: the stage
@@ -123,17 +131,17 @@ import pandas as pd
 from abe import storage
 from abe.blend.black_litterman import BLResult, bl_blend
 from abe.blend.covariance import ledoit_wolf_sigma
-from abe.constants import HORIZON_BARS, UNIVERSE
-from abe.features.basic import (
+from abe.calc import (
     LOG_RETURN_COLUMN,
     REALIZED_VOL_COLUMN,
     log_returns,
     realized_vol,
 )
+from abe.constants import DELTA, HORIZON_BARS, UNIVERSE, W_MAX
 from abe.ingest.macro import MacroStatus, load_fred_api_key, probe_fred_key
-from abe.ingest.sources import CacheAdapter, utc_now_iso
+from abe.ingest.sources import PRICE_PROVIDER_LABEL, CacheAdapter, utc_now_iso
 from abe.model.base import EWMABaseline, Forecast, WorldModel
-from abe.optimize.mvu import optimize_weights
+from abe.optimize.mvu import GAMMA_TC, optimize_weights
 
 __all__ = [
     "STAGES",
@@ -446,6 +454,10 @@ def _stage_ingest(ctx: _RunContext) -> tuple[str, dict[str, object]]:
         }
     detail: dict[str, object] = {
         "source": adapter.source,
+        # Human-readable provenance for the card: `source` records WHO served
+        # this run (cache), `price_provider` names the ultimate upstream (Yahoo)
+        # regardless of the cache hop. One source of truth (ingest.sources).
+        "price_provider": PRICE_PROVIDER_LABEL,
         "prices": per_asset,
         "macro": {
             "enabled": ctx.macro_status.enabled,
@@ -476,6 +488,12 @@ def _stage_features(ctx: _RunContext) -> tuple[str, dict[str, object]]:
         latest[asset] = {"date": str(returns.index[-1]), **values}
     detail: dict[str, object] = {
         "features": [LOG_RETURN_COLUMN, REALIZED_VOL_COLUMN],
+        # Per-feature lookback so the card can say what each number spans.
+        # HORIZON_BARS is the realized-vol window (also the forecast horizon).
+        "windows": {
+            LOG_RETURN_COLUMN: "1 day",
+            REALIZED_VOL_COLUMN: f"{HORIZON_BARS} days, annualized",
+        },
         "latest": latest,
     }
     return ("ok", detail)
@@ -540,6 +558,11 @@ def _stage_blend(ctx: _RunContext) -> tuple[str, dict[str, object]]:
             },
         )
     detail: dict[str, object] = {
+        # Prior (pi, all assets) and view (Q, viewed assets) come straight from
+        # the diagnostics the blend already computes — surfacing them (not new
+        # math) so the card shows prior -> view -> posterior, the BL story.
+        "prior": diag["pi"],
+        "view": diag["Q"],
         "posterior_mu": {asset: float(bl.mu_post[asset]) for asset in UNIVERSE},
         "posterior_sigma": {
             asset: math.sqrt(float(bl.sigma_post.loc[asset, asset])) for asset in UNIVERSE
@@ -576,6 +599,18 @@ def _stage_optimize(ctx: _RunContext) -> tuple[str, dict[str, object]]:
         "relaxed_turnover": result.relaxed_turnover,
         "solver_status": result.status,
         "cold_start": result.prev_weights is None,
+        # The objective the card explains — parameters sourced from the real
+        # constants (imported, never inlined) so the card can never drift from
+        # what optimize_weights actually solved.
+        "objective": {
+            # ASCII math, matching calc.py's mvu_objective explanation and the
+            # repo-wide convention (mvu.py docstring) — one rendering of the form.
+            "form": "maximize w^T mu - (delta/2) w^T Sigma w - gamma*||w - w_prev||_1",
+            "delta": DELTA,
+            "gamma_tc": GAMMA_TC,
+            "w_max": W_MAX,
+            "constraints": ["sum(w) = 1", "0 <= w <= w_max"],
+        },
     }
     return ("ok", detail)
 

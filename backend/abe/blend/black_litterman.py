@@ -12,9 +12,10 @@ returns"):
 
 - ``Sigma`` arrives ANNUALIZED (``covariance.ledoit_wolf_sigma``).
 - ``Forecast.mu`` is an H-day log-return; it is annualized HERE — and only
-  here — via ``Q = mu * TRADING_DAYS / HORIZON_BARS`` (x12 for H=21). This
-  function is THE H-day -> annual boundary; nothing upstream or downstream
-  converts again.
+  here — via ``Q = annualize_mean(mu)`` (= ``mu * TRADING_DAYS / HORIZON_BARS``,
+  x12 for H=21; the shared ``abe.calc`` helper is the one source of truth for
+  the scale). This function is THE H-day -> annual boundary; nothing upstream
+  or downstream converts again.
 - Everything is EXCESS return with ``rf = 0.0`` explicit: ``risk_free_rate``
   is passed at every pypfopt call site that accepts it
   (``market_implied_prior_returns``, ``BlackLittermanModel``). V1 always calls
@@ -51,20 +52,14 @@ import numpy as np
 import pandas as pd
 from pypfopt.black_litterman import BlackLittermanModel, market_implied_prior_returns
 
-from abe.blend.confidence import idzorek_confidence
-from abe.constants import DELTA, HORIZON_BARS, TAU, TRADING_DAYS, UNIVERSE, W_MKT
+from abe.calc import annualize_mean, idzorek_confidence
+from abe.constants import DELTA, TAU, UNIVERSE, W_MKT
 from abe.model.base import Forecast
 
 __all__ = [
-    "H_TO_ANNUAL",
     "BLResult",
     "bl_blend",
 ]
-
-H_TO_ANNUAL: Final[float] = TRADING_DAYS / HORIZON_BARS
-"""H-day -> annual scaling for a MEAN log-return (x12 for H=21). Derived from
-the shared constants; ``bl_blend`` is the only consumer (the one conversion
-boundary)."""
 
 _W_MKT_SUM_TOL: Final[float] = 1e-6
 """Absolute tolerance for ``sum(w_mkt) == 1`` — loose enough for hand-typed
@@ -163,7 +158,7 @@ def bl_blend(
     ``pi = delta * sigma_annual * w_mkt + rf`` (annualized excess; ``rf=0.0``
     in V1), computed through pypfopt's ``market_implied_prior_returns`` with
     ``risk_free_rate`` explicit. Each forecast becomes one absolute view in
-    canonical ``UNIVERSE`` order: ``Q[i] = forecasts[asset].mu * H_TO_ANNUAL``
+    canonical ``UNIVERSE`` order: ``Q[i] = annualize_mean(forecasts[asset].mu)``
     (the H-day -> annual boundary; module docstring) with
     ``confidence[i] = idzorek_confidence(mu, sigma)`` computed from the RAW
     H-day pair (decision in the module docstring). Posterior mu/Sigma via
@@ -209,7 +204,7 @@ def bl_blend(
             diagnostics=_diagnostics(pi, mu_post, {}, {}, {}),
         )
 
-    absolute_views = {asset: float(forecasts[asset].mu) * H_TO_ANNUAL for asset in viewed}
+    absolute_views = {asset: annualize_mean(float(forecasts[asset].mu)) for asset in viewed}
     confidences = {
         asset: idzorek_confidence(forecasts[asset].mu, forecasts[asset].sigma) for asset in viewed
     }

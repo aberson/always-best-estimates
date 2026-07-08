@@ -24,7 +24,7 @@ from abe.afml.fracdiff import (
     fracdiff_series,
     min_d_search,
 )
-from abe.features.basic import log_returns
+from abe.calc import log_returns
 
 
 def _dates(n: int) -> pd.Index:

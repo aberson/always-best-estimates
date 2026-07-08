@@ -17,8 +17,10 @@ import pytest
 from seeding import append_price_day, revise_prices, seed_prices
 
 from abe import storage
-from abe.constants import HORIZON_BARS, UNIVERSE
+from abe.constants import DELTA, HORIZON_BARS, UNIVERSE, W_MAX
 from abe.ingest.macro import MACRO_DISABLED_NO_KEY, MACRO_OK, MacroStatus
+from abe.ingest.sources import PRICE_PROVIDER_LABEL
+from abe.optimize.mvu import GAMMA_TC
 from abe.pipeline import (
     STAGES,
     last_ok_data_fetched_at,
@@ -248,6 +250,55 @@ def test_full_run_writes_all_tables(writer: sqlite3.Connection) -> None:
     assert all(row[2] is None for row in weights)  # cold start
     assert all(float(row[3]) == 0.0 for row in weights)
     assert all(int(row[4]) == 0 for row in weights)
+
+
+def test_transparency_fields_land_in_stage_details(writer: sqlite3.Connection) -> None:
+    """Track 1 producer -> consumer round trip through the PRODUCTION pipeline.
+
+    Run the real pipeline, read the persisted ``run_stages`` rows back (the
+    exact path the API serves the UI cards from), and assert the added
+    transparency fields are present with the right values — the bug class
+    (a card-payload key that never actually lands) lives in this relationship,
+    not in either endpoint alone.
+    """
+    run_id = run_pipeline(writer, trigger="manual", macro_status=OK_STATUS)
+    assert _run_row(writer, run_id)[0] == "ok"
+    by_stage = {stage: detail for stage, _, detail in _stage_rows(writer, run_id)}
+
+    # ingest: price_provider added alongside the existing `source`.
+    ingest = by_stage["ingest"]
+    assert isinstance(ingest, dict)
+    assert ingest["source"] == "cache"  # existing field untouched
+    assert ingest["price_provider"] == PRICE_PROVIDER_LABEL
+
+    # features: per-feature windows added alongside the existing feature list.
+    features = by_stage["features"]
+    assert isinstance(features, dict)
+    assert features["features"] == ["log_return", "realized_vol"]  # existing key
+    assert features["windows"] == {
+        "log_return": "1 day",
+        "realized_vol": f"{HORIZON_BARS} days, annualized",
+    }
+
+    # blend: prior (pi, all assets) and view (Q, viewed assets) now surfaced,
+    # per asset, in addition to the existing posterior keys.
+    blend = by_stage["blend"]
+    assert isinstance(blend, dict)
+    assert set(blend["prior"]) == set(UNIVERSE)
+    assert set(blend["view"]) == set(UNIVERSE)  # EWMA forecasts every asset
+    assert all(isinstance(v, float) for v in blend["prior"].values())
+    assert set(blend["posterior_mu"]) == set(UNIVERSE)  # existing key intact
+
+    # optimize: objective block sourced from the REAL constants (not hardcoded).
+    optimize = by_stage["optimize"]
+    assert isinstance(optimize, dict)
+    objective = optimize["objective"]
+    assert objective["delta"] == DELTA
+    assert objective["gamma_tc"] == GAMMA_TC
+    assert objective["w_max"] == W_MAX
+    assert objective["constraints"] == ["sum(w) = 1", "0 <= w <= w_max"]
+    assert "maximize" in objective["form"]
+    assert set(optimize["weights"]) == set(UNIVERSE)  # existing key intact
 
 
 def test_invalid_trigger_raises(writer: sqlite3.Connection) -> None:

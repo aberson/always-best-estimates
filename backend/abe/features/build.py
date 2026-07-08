@@ -2,14 +2,14 @@
 
 Assembles the per-asset feature matrix the minimal JEPA (Step 13) consumes:
 daily ``log_return`` + annualized ``realized_vol`` (both from
-features/basic.py, the EWMA path's building blocks) + an optional
+``abe.calc``, the EWMA path's building blocks) + an optional
 frac-differenced log-price column per asset, joined with FRED macro columns
 **without lookahead**.
 
 **Column shape (one source of truth).** Flat ``"ASSET_feature"`` names
 (:func:`feature_column`), chosen over a MultiIndex for JEPA friendliness — the
 model reads a plain 2-D float matrix and a flat column list needs no
-``get_level_values`` plumbing. Per-asset feature names reuse the basic.py /
+``get_level_values`` plumbing. Per-asset feature names reuse the abe.calc /
 fracdiff.py constants (``log_return``, ``realized_vol``, ``fracdiff``); macro
 columns are the FRED ``series_id`` strings verbatim. Universe tickers carry no
 ``_`` so ``ASSET_feature`` stays unambiguous.
@@ -39,7 +39,7 @@ import numpy as np
 import pandas as pd
 
 from abe.afml.fracdiff import FRACDIFF_COLUMN, FracDiffParams, fracdiff_series
-from abe.features.basic import LOG_RETURN_COLUMN, REALIZED_VOL_COLUMN, log_returns, realized_vol
+from abe.calc import LOG_RETURN_COLUMN, REALIZED_VOL_COLUMN, log_returns, realized_vol
 
 __all__ = [
     "FEATURE_NAME_SEP",
@@ -99,7 +99,7 @@ def build_features(
     Raises ``ValueError`` on empty ``prices``, or (when ``params`` is provided)
     on any asset missing from ``params``. Per-asset guards (ascending index,
     NaN/non-finite, positivity, minimum length) are enforced by the underlying
-    features/basic.py + fracdiff.py functions.
+    abe.calc + fracdiff.py functions.
     """
     if not prices:
         raise ValueError("prices must contain at least one asset series")

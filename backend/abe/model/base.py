@@ -34,8 +34,8 @@ from typing import Final, Protocol, runtime_checkable
 import numpy as np
 import pandas as pd
 
+from abe.calc import LOG_RETURN_COLUMN, non_finite_summary
 from abe.constants import HORIZON_BARS
-from abe.features.basic import LOG_RETURN_COLUMN, non_finite_summary
 
 __all__ = [
     "DEFAULT_HALFLIFE",

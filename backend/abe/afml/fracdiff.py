@@ -13,8 +13,8 @@ Three public pieces (plan.md Step 12, module ``afml/fracdiff.py``):
   ``w_k = -w_{k-1} * (d - k + 1) / k``.
 - :func:`fracdiff_series` — apply those weights as a fixed-width convolution to
   an ascending ISO-indexed (log-price) series. Warm-up rows shorter than the
-  weight window are DROPPED, never emitted as NaN (the features/basic.py NaN
-  contract). Index-order and non-finite guards mirror features/basic.py.
+  weight window are DROPPED, never emitted as NaN (the abe.calc NaN
+  contract). Index-order and non-finite guards mirror abe.calc.
 - :func:`min_d_search` — smallest d on a grid whose FFD series passes an ADF
   stationarity test, returning a frozen :class:`FracDiffParams`.
 
@@ -49,7 +49,7 @@ import numpy as np
 import numpy.typing as npt
 import pandas as pd
 
-from abe.features.basic import non_finite_summary
+from abe.calc import non_finite_summary
 
 __all__ = [
     "DEFAULT_D_GRID",
@@ -156,7 +156,7 @@ def fracdiff_series(
     Applying a persisted ``(d, threshold)`` here is fully deterministic — this
     is the frozen-params inference path.
 
-    Guards mirror features/basic.py (order-dependence and NaN must fail loud,
+    Guards mirror abe.calc (order-dependence and NaN must fail loud,
     never compute silently wrong): raises ``ValueError`` on a non-ascending
     index, on NaN/non-finite values (naming the offending rows), and when the
     series is shorter than the weight window (the result would be silently

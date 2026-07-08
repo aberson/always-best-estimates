@@ -1,6 +1,8 @@
 """abe.features — feature construction for the WorldModel paths.
 
+The minimal EWMA-path features (log-returns + realized vol) now live in the
+transparent ``abe.calc`` module (Track 1 relocation).
+
 Modules:
-- ``basic``: log-returns + realized vol (the EWMA path's minimal features).
-- ``build``: full deterministic feature matrix (arrives in Step 12).
+- ``build``: full deterministic feature matrix (JEPA path, plan Step 12).
 """

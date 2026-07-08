@@ -14,9 +14,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from abe import constants
-from abe.features import basic
-from abe.features.basic import LOG_RETURN_COLUMN, log_returns
+from abe import calc, constants
+from abe.calc import LOG_RETURN_COLUMN, log_returns
 from abe.model import base
 from abe.model.base import (
     MIN_HISTORY_BARS,
@@ -332,4 +331,4 @@ def test_features_to_model_round_trip() -> None:
 def test_log_return_column_has_one_source_of_truth() -> None:
     # The consumer must reference THE producer's constant (imported, not
     # re-declared) so any future re-duplication fails CI.
-    assert base.LOG_RETURN_COLUMN is basic.LOG_RETURN_COLUMN
+    assert base.LOG_RETURN_COLUMN is calc.LOG_RETURN_COLUMN
