@@ -354,9 +354,6 @@ function renderBlend(detail: JsonRecord): ReactNode {
   // may be absent on rows written before this stage was enriched.
   const prior = asRecord(detail["prior"]);
   const view = asRecord(detail["view"]);
-  // The covariance is fit on the common (inner-join) history — this is where
-  // the differing per-asset histories get aligned/truncated.
-  const cov = asRecord(detail["covariance_window"]);
   return (
     <>
       <table className="detail-table">
@@ -387,18 +384,7 @@ function renderBlend(detail: JsonRecord): ReactNode {
           })}
         </tbody>
       </table>
-      <p className="caveat">
-        All annualized. View Q is the Forecast annualized; the posterior blends the
-        market-equilibrium prior &pi; toward Q, weighted by each view&rsquo;s confidence.
-      </p>
-      {cov !== null ? (
-        <p className="caveat">
-          Covariance uses the common return history {scalar(cov["start"])} &rarr;{" "}
-          {scalar(cov["end"])} ({scalar(cov["bars"])} bars) &mdash; where the differing per-asset
-          histories are aligned (one bar after the common price start, since returns drop the
-          first bar).
-        </p>
-      ) : null}
+      <p className="caveat">All annualized (prior &pi; &rarr; view Q &rarr; posterior &mu;).</p>
     </>
   );
 }
@@ -450,11 +436,24 @@ function renderOptimize(detail: JsonRecord): ReactNode {
  *  explanation list. Optimize moves its per-asset prev/turnover table here so
  *  the visible card stays lean (the aggregate is ~always 0 on the 5-min loop). */
 function hiddenExtra(stage: StageRow): ReactNode {
-  if (stage.stage !== "optimize") {
-    return null;
-  }
   const detail = asRecord(stage.detail);
   if (detail === null) {
+    return null;
+  }
+  if (stage.stage === "blend") {
+    const cov = asRecord(detail["covariance_window"]);
+    if (cov === null) {
+      return null;
+    }
+    return (
+      <p className="explain-desc">
+        Covariance is fit on the common return history {scalar(cov["start"])} &rarr;{" "}
+        {scalar(cov["end"])} ({scalar(cov["bars"])} bars) &mdash; the window all assets share (one
+        bar after the common price start, since returns drop the first bar).
+      </p>
+    );
+  }
+  if (stage.stage !== "optimize") {
     return null;
   }
   const weights = asRecord(detail["weights"]);
