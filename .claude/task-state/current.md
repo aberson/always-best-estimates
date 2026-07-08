@@ -5,8 +5,8 @@
 **Last written:** 2026-07-08T00:30:00Z
 
 ## WIP
-**Current:** Step 14: JEPA walk-forward evaluation gate (#15)
-**Approach:** eval/walk_forward.py — pre-registered purged walk-forward eval of (μ,σ) THROUGH the production WorldModel interface, JEPA vs EWMA on identical windows (forecast MSE/IC + σ calibration coverage); committed report docs/eval/jepa-vs-ewma-<date>.md; records "EWMA remains default unless JEPA wins" with measured numbers. NOTE: all NEW agents spawn with model=opus per operator instruction. This is the LAST automated step before the phase halt (Step 15 = wait).
+**Current:** Phase final verification + report (Steps 1–14 ALL DONE)
+**Approach:** run full gates, verify all issues #2–#15 closed, emit the build-phase final report, HALT before Step 15 soak (Type: wait, #16) per goal; M1/M2 (#17/#18) = operator handoff
 
 ## Next Action
 /build-phase --plan plan.md --resume 3
@@ -24,7 +24,8 @@
 - Step 10 React UI: PASS iter 1+orch fixes (285 tests; #11 closed; 3 runtime reviewers CONFIRMED vs live Playwright evidence on real db; StaticFiles prod serving)
 - Step 11 Scheduler: PASS iter 2/3 (299 tests; #12 closed; structural single-flight; 202-at-START trigger; daily fetch ≥22:00 UTC; sweeps at startup+iteration; falsification-verified pins)
 - Step 12 Feature layer: PASS iter 1+orch fixes (350 tests; #13 closed; statsmodels added; per-series merge_asof no-lookahead verified; RW anchor d≥0.35 honest; build output float64-pinned)
-- Step 13 Minimal JEPA: PASS iter 2/3 (381 tests; #14; λ_ret=0.05 SSL-primary; σ predictive-scale 6/6 seeds; μ drift-scale 8/8; format_version enforced; DEFAULT ewma pinned)
+- Step 13 Minimal JEPA: PASS iter 2/3 (381 tests; #14 closed; λ_ret=0.05 SSL-primary; σ predictive-scale 6/6 seeds; μ drift-scale 8/8; format_version enforced; DEFAULT ewma pinned)
+- Step 14 Walk-forward eval: PASS iter 2/3 (401 tests; #15; corrected instrument (production full-history frames); real eval: JEPA promoted on thin margin (MSE 1.389e-3 vs 1.429e-3, coverage 0.897 vs 0.924); report committed docs/eval/jepa-vs-ewma-2026-07-08.md; DEFAULT still EWMA — promotion manual)
 
 ## Dead Ends
 (none yet)
