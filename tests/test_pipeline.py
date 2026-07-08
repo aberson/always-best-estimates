@@ -255,6 +255,40 @@ def test_invalid_trigger_raises(writer: sqlite3.Connection) -> None:
         run_pipeline(writer, trigger="cron", macro_status=OK_STATUS)
 
 
+def test_on_run_started_fires_at_run_start_through_production_pipeline(
+    writer: sqlite3.Connection, seeded_db: Path
+) -> None:
+    """run_pipeline ITSELF must invoke on_run_started at the run's START —
+    the phase-0 'running' row is already COMMITTED (asserted through a SECOND
+    connection, so in-transaction visibility can't fake it) and NO stage has
+    executed yet. This pins the Step 11 trigger contract (202 at run START)
+    at the production producer: the scheduler's defensive
+    resolve-at-completion fallback would otherwise mask a dropped call and
+    silently regress the endpoint to 202-at-completion."""
+    observed: list[tuple[int, str, int]] = []
+
+    def probe(run_id: int) -> None:
+        other = sqlite3.connect(seeded_db)
+        try:
+            status = other.execute(
+                "SELECT status FROM runs WHERE run_id = ?", (run_id,)
+            ).fetchone()[0]
+            stage_count = other.execute(
+                "SELECT COUNT(*) FROM run_stages WHERE run_id = ?", (run_id,)
+            ).fetchone()[0]
+        finally:
+            other.close()
+        observed.append((run_id, str(status), int(stage_count)))
+
+    returned = run_pipeline(writer, trigger="manual", macro_status=OK_STATUS, on_run_started=probe)
+
+    # Exactly one callback, carrying the returned id, observed while the run
+    # was 'running' with ZERO stage rows (at START, not at completion).
+    assert observed == [(returned, "running", 0)]
+    # And the run then completed normally.
+    assert _run_row(writer, returned)[0] == "ok"
+
+
 # --------------------------------------------------------------------------- #
 # Freshness gate through run_pipeline
 # --------------------------------------------------------------------------- #

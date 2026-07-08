@@ -387,6 +387,7 @@ into Automated + Manual subsections.
 - **Produces:** `backend/abe/scheduler.py`, lifespan wiring in `api.py`
 - **Done when:** an unchanged-data test writes `status='skipped'`; a raising-stage test writes an `error` row AND the next scheduled run still fires; the trigger endpoint coalesces during an active run; a `force=true` trigger bypasses the freshness gate.
 - **Depends on:** 8
+- **Status:** DONE (2026-07-08) — scheduler owns the writer conn + ThreadPoolExecutor(max_workers=1) (conn created ON the executor thread); structural single-flight (one loop task serializes dispatch); fixed-delay 300s from run completion; trigger = 202-at-START via on_run_started callback (coalesced → active run's id + already_running=true, force flags OR pre-start); daily fetch at ≥22:00 UTC gated by MAX(fetched_at_utc) marker (empty-db fetch IS the backfill); stale-'running' sweep at startup AND each iteration; wal_checkpoint(TRUNCATE) after each run (busy logged); /health live during runs. Frontend trigger-note adapted to 202-at-START (2-poll grace window).
 
 ### Step 12: Feature layer — frac-diff + purged CV + macro join
 - **Problem:** `afml/fracdiff.py` (fixed-width FFD on log-prices; min-d ADF grid search on TRAINING folds only; persist frozen `{d, tau, window_len, adf_p, corr}`), `afml/purged_cv.py` (purged + embargoed ≥H splits), `features/build.py` (returns/vol + frac-diff + FRED `merge_asof` backward on `available_date`; deterministic matrix). In-project, against current pandas/sklearn.

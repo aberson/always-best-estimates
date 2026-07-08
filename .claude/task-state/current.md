@@ -5,8 +5,8 @@
 **Last written:** 2026-07-08T00:30:00Z
 
 ## WIP
-**Current:** Step 11: Scheduler + degraded modes + error resilience (#12)
-**Approach:** scheduler.py — asyncio lifespan task: fixed-delay loop (wait_for(event, timeout=300)) + on-demand trigger + single-flight; pipeline via ThreadPoolExecutor(max_workers=1); daily-fetch vs 5-min-recompute split; per-iteration try/except → error row + loop restart; wal_checkpoint after runs; trigger endpoint swaps to event-set + coalesce; stale-'running' startup sweep (owed from Step 8)
+**Current:** Step 12: Feature layer — frac-diff + purged CV + macro join (#13)
+**Approach:** afml/fracdiff.py (fixed-width FFD on log-prices, min-d ADF grid on TRAINING folds only, frozen params), afml/purged_cv.py (purged + embargoed ≥H splits), features/build.py (returns/vol + frac-diff + FRED merge_asof backward on available_date; deterministic matrix). Garbage anchors: white-noise→d≈0, random-walk→d≈1. NOTE: all NEW agents spawn with model=opus per operator instruction.
 
 ## Next Action
 /build-phase --plan plan.md --resume 3
@@ -21,7 +21,8 @@
 - Step 7 cvxpy MVU optimizer: PASS iter 1+orch fixes (244 tests total; #8 closed; γ_tc=0.002 band anchored both directions; MVUResult(weights,prev_weights,turnover,relaxed_turnover,status))
 - Step 8 Pipeline+API+ledger: PASS iter 2/3 (274 tests total; #9 closed; dual-watermark freshness gate; two-phase txn; V1 sync trigger blocks loop — Step 11 swaps to executor + owns stale-running sweep)
 - Step 9 Smoke gate: PASS iter 2/3 (282 default + 1 smoke; #10 closed; real SMOKE PASS vs production db; -m smoke never skips; thread-join watchdog; structural no-network check)
-- Step 10 React UI: PASS iter 1+orch fixes (285 tests; #11; 3 runtime reviewers CONFIRMED vs live Playwright evidence on real db; StaticFiles prod serving; trigger-note lifecycle fixed for Step 11 scheduler)
+- Step 10 React UI: PASS iter 1+orch fixes (285 tests; #11 closed; 3 runtime reviewers CONFIRMED vs live Playwright evidence on real db; StaticFiles prod serving)
+- Step 11 Scheduler: PASS iter 2/3 (299 tests; #12; structural single-flight; 202-at-START trigger; daily fetch ≥22:00 UTC; sweeps at startup+iteration; falsification-verified on_run_started + wal-checkpoint pins)
 
 ## Dead Ends
 (none yet)

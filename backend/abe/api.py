@@ -19,7 +19,8 @@ Routes (plan section 6):
   the only clients are our own UI and the operator, and a loud contract
   beats a quiet one.
 - ``POST /api/runs/trigger`` ``{force?: bool}`` -> ``202 {run_id,
-  already_running: false}``.
+  already_running}`` — answered at the run's START, not its completion
+  (Step 11 trigger contract below).
 
 Response shapes are plain dicts mirroring the stored rows; dates/timestamps
 are returned as the stored TEXT strings. ``detail_json`` columns are parsed
@@ -30,29 +31,29 @@ Connection discipline (plan section 3, one-writer):
 
 - All reads go through short-lived ``storage.open_read_only`` connections,
   opened and closed inside the request.
-- The trigger endpoint uses THE writer connection owned by the app
-  (``app.state.writer_conn``, created in lifespan). In Step 11 this same
-  connection becomes the pipeline thread's connection (handed to the
-  single-worker executor); until then the endpoint is ``async`` so it runs on
-  the lifespan's event-loop thread — sqlite3's ``check_same_thread`` guard
-  stays intact, and the single event loop serializes concurrent triggers.
+- THE writer connection is owned by the :class:`abe.scheduler.Scheduler`
+  (created in lifespan, stored on ``app.state.scheduler``), which opens it ON
+  its single-worker executor thread and runs every pipeline body there —
+  sqlite3's ``check_same_thread`` guard stays intact, and the single executor
+  thread serializes all writes. The API process never touches the writer
+  connection directly.
 
-Trigger design note (V1 pre-scheduler): the endpoint RUNS the pipeline
-synchronously inside the request and returns ``202 {run_id,
-already_running: false}`` with the finished run's id. Known V1 consequence:
-while that synchronous run executes, the single event loop is blocked, so ALL
-routes — including ``/health`` — stall until it finishes (seconds against a
-warm cache). Step 11 fixes this by swapping ONLY the body of ``trigger_run``
-— set the scheduler's ``asyncio.Event`` and return immediately (coalescing to
-``already_running: true`` during an active run), with the pipeline body moved
-onto the single-worker executor — the route shape, status code, and response
-keys are already final.
+Trigger contract (Step 11): the endpoint calls
+``scheduler.request_run(force)`` and answers ``202`` when the run has STARTED
+(its ``run_id`` exists as a committed ``'running'`` row) but not finished —
+clients poll ``/api/runs/latest`` (the UI already does) for the result. While
+a run is executing, a concurrent trigger COALESCES: no second run is queued;
+the response carries the ACTIVE run's id with ``already_running: true`` (and
+the coalesced request's ``force`` flag is dropped — plan section 6). Because
+the pipeline executes on the executor thread, the event loop stays free: ALL
+routes, including ``/health``, respond during an active run.
 
-Lifespan also resolves the macro status ONCE via
+Lifespan resolves the macro status ONCE via
 ``probe_fred_key(load_fred_api_key())`` (plan Step 4's startup key-probe):
 with no key configured this makes no network request and yields the explicit
 ``MACRO_DISABLED_NO_KEY`` degraded mode, which every run surfaces on its
-ingest card.
+ingest card. The scheduler then starts (sweeping orphaned ``'running'`` rows)
+and fires an immediate ``trigger='startup'`` run (plan section 10).
 
 Production static serving (plan Step 10, section 2 one-process mode): IF the
 built frontend exists (``frontend/dist``, produced by ``npm run build
@@ -78,7 +79,7 @@ from pydantic import BaseModel
 
 from abe import storage
 from abe.ingest.macro import load_fred_api_key, probe_fred_key
-from abe.pipeline import run_pipeline
+from abe.scheduler import Scheduler, SchedulerConfig
 
 __all__ = [
     "DEFAULT_HISTORY_LIMIT",
@@ -193,6 +194,7 @@ def create_app(
     db_path: str | Path = storage.DEFAULT_DB_PATH,
     *,
     static_dir: str | Path = FRONTEND_DIST,
+    scheduler_config: SchedulerConfig | None = None,
 ) -> FastAPI:
     """Build the app against ``db_path`` (configurable for tests).
 
@@ -202,6 +204,11 @@ def create_app(
     ``static_dir`` is the built frontend to mount at ``/`` (default
     :data:`FRONTEND_DIST`; configurable for tests). A missing directory means
     NO mount — the conditional-serving contract in the module docstring.
+
+    ``scheduler_config`` tunes the lifespan scheduler; ``None`` (production)
+    uses ``SchedulerConfig()`` defaults. Overrides are the documented test
+    seams (offline suites disable the daily network fetch and/or inject a
+    ``pipeline_fn`` — see ``abe.scheduler``'s module docstring).
     """
     resolved_path = Path(db_path)
 
@@ -214,13 +221,22 @@ def create_app(
         # exists — a failed startup can never leak open WAL handles (Windows
         # file locks would otherwise pin the db file).
         app.state.macro_status = probe_fred_key(load_fred_api_key())
-        # THE writer connection (one-writer discipline). Step 11 hands this
-        # same connection to the pipeline executor thread.
-        app.state.writer_conn = storage.open_writer(resolved_path)
+        # The scheduler owns THE writer connection + the single-worker
+        # executor thread (Step 11): start() opens the connection ON that
+        # thread, sweeps orphaned 'running' rows, then fires the immediate
+        # startup run; stop() drains the executor and closes the connection
+        # on its owning thread.
+        scheduler = Scheduler(
+            resolved_path,
+            macro_status=app.state.macro_status,
+            config=scheduler_config,
+        )
+        await scheduler.start()
+        app.state.scheduler = scheduler
         try:
             yield
         finally:
-            app.state.writer_conn.close()
+            await scheduler.stop()
 
     app = FastAPI(title="always-best-estimates", lifespan=lifespan)
 
@@ -268,21 +284,20 @@ def create_app(
 
     @app.post("/api/runs/trigger", status_code=202)
     async def trigger_run(request: Request, body: TriggerRequest | None = None) -> dict[str, Any]:
-        """Run the pipeline now (V1: synchronously in the request).
+        """Request a run NOW; the 202 answers at the run's START, not its end.
 
-        Step 11 swap point: replace this body with "set the scheduler event,
-        return immediately" (coalescing to ``already_running: true`` while a
-        run is active). The response contract is already final.
+        Idle: wakes the scheduler and awaits the new run's START (a committed
+        ``'running'`` row with an allocated id) -> ``{run_id,
+        already_running: false}``; poll ``/api/runs/latest`` for completion.
+        Run already executing: coalesces (single-flight, no second run
+        queued) -> the ACTIVE run's ``{run_id, already_running: true}``
+        immediately; a coalesced request's ``force`` flag is dropped by
+        design (module docstring / plan section 6).
         """
         payload = body if body is not None else TriggerRequest()
-        conn: sqlite3.Connection = request.app.state.writer_conn
-        run_id = run_pipeline(
-            conn,
-            trigger="manual",
-            force=payload.force,
-            macro_status=request.app.state.macro_status,
-        )
-        return {"run_id": run_id, "already_running": False}
+        scheduler: Scheduler = request.app.state.scheduler
+        pending = await scheduler.request_run(force=payload.force)
+        return {"run_id": pending.run_id, "already_running": pending.already_running}
 
     # Production static serving (module docstring): mounted LAST so every API
     # route above matches first; conditional so dev/tests without a build

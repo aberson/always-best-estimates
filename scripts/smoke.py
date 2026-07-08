@@ -17,6 +17,16 @@ end-to-end. Its purpose is surfacing the drift class that mocked unit tests
 cannot see (code-quality rule: tests with mocks can't see producer-consumer
 drift).
 
+Step 11 scheduler interplay: entering the lifespan starts the scheduler,
+which fires an immediate ``trigger='startup'`` run; the smoke waits for it to
+settle (otherwise the forced trigger would coalesce into it,
+``already_running: true``, and the startup run may legitimately be
+``'skipped'``). The trigger endpoint now answers at the run's START, so the
+smoke polls the ``runs`` row to a terminal status before verifying. The
+scheduler's DAILY NETWORK FETCH is disabled via ``SchedulerConfig`` — the
+smoke's zero-network contract (below) is the point of the gate; the fetch
+job has its own offline tests (tests/test_scheduler.py).
+
 Stop the production app first — the smoke opens its own writer connection,
 and a concurrent scheduler run can otherwise contend for the write lock or
 land a newer run between our trigger and the latest-run check.
@@ -88,9 +98,10 @@ from pathlib import Path
 
 # Module-level binding (not ``import time``) so tests can monkeypatch the
 # smoke's clock without touching the shared ``time`` module.
-from time import monotonic
+from time import monotonic, sleep
 from typing import Any, Final
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from abe import storage
@@ -98,6 +109,7 @@ from abe.api import create_app
 from abe.constants import UNIVERSE
 from abe.ingest.macro import MACRO_DISABLED_NO_KEY
 from abe.pipeline import STAGES
+from abe.scheduler import SchedulerConfig
 
 __all__ = [
     "DEFAULT_DB_PATH",
@@ -124,6 +136,12 @@ DEFAULT_DB_PATH: Final[Path] = PROJECT_ROOT / storage.DEFAULT_DB_PATH
 
 WATCHDOG_SECONDS: Final[float] = 120.0
 """Hard wall-clock budget for the whole booted cycle (~60s target, 2x headroom)."""
+
+POLL_BUDGET_SECONDS: Final[float] = 90.0
+"""Per-poll wall-clock budget for the startup-settle and run-terminal waits.
+Nests INSIDE the 120s :data:`WATCHDOG_SECONDS` with headroom, so an exhausted
+poll raises a classified SmokeFailureError before the outer watchdog abandons
+the worker thread."""
 
 EXIT_OK: Final[int] = 0
 """Smoke PASS: one real cycle completed and every assertion held."""
@@ -383,6 +401,65 @@ def _verify_no_network_modules(preloaded: frozenset[str], macro_code: str, run_i
         )
 
 
+def _max_run_id(path: Path) -> int:
+    """Highest existing ``run_id`` (0 on an empty ledger)."""
+    conn = storage.open_read_only(path)
+    try:
+        row = conn.execute("SELECT MAX(run_id) FROM runs").fetchone()
+    finally:
+        conn.close()
+    return int(row[0]) if row is not None and row[0] is not None else 0
+
+
+def _run_status(path: Path, run_id: int) -> str | None:
+    conn = storage.open_read_only(path)
+    try:
+        row = conn.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    finally:
+        conn.close()
+    return None if row is None else str(row[0])
+
+
+def _wait_startup_settled(
+    app: FastAPI, path: Path, baseline: int, budget_s: float = POLL_BUDGET_SECONDS
+) -> None:
+    """Wait for the lifespan startup run (id > ``baseline``) to reach a
+    terminal status AND the scheduler to go idle, so the forced trigger below
+    cannot coalesce into it (``already_running``)."""
+    deadline = monotonic() + budget_s
+    while True:
+        newest = _max_run_id(path)
+        if newest > baseline:
+            status = _run_status(path, newest)
+            if (
+                status is not None
+                and status not in ("running", "queued")
+                and not app.state.scheduler.run_in_progress
+            ):
+                return
+        if monotonic() > deadline:
+            raise SmokeFailureError(
+                f"startup run did not settle within {budget_s:.0f}s "
+                f"(newest run {newest}, status {_run_status(path, newest)!r})"
+            )
+        sleep(0.05)
+
+
+def _wait_run_terminal(path: Path, run_id: int, budget_s: float = POLL_BUDGET_SECONDS) -> str:
+    """Poll the triggered run to a terminal status (the 202 answers at START)."""
+    deadline = monotonic() + budget_s
+    while True:
+        status = _run_status(path, run_id)
+        if status is not None and status not in ("running", "queued"):
+            return status
+        if monotonic() > deadline:
+            raise SmokeFailureError(
+                f"run {run_id} did not reach a terminal status within {budget_s:.0f}s "
+                f"(status {status!r})"
+            )
+        sleep(0.05)
+
+
 def _run_cycle(path: Path, start: float) -> SmokeReport:
     """The whole booted cycle (lifespan enter -> trigger -> verify).
 
@@ -391,8 +468,14 @@ def _run_cycle(path: Path, start: float) -> SmokeReport:
     thread.
     """
     preloaded = frozenset(name for name in _NETWORK_MODULES if name in sys.modules)
-    # Production factory + lifespan: real macro probe, THE writer connection.
-    with TestClient(create_app(path)) as client:
+    baseline = _max_run_id(path)
+    # Production factory + lifespan: real macro probe, THE writer connection
+    # (owned by the scheduler). The daily NETWORK fetch is disabled — the
+    # zero-network contract is this gate's point (module docstring); the
+    # recompute path under test is untouched by the override.
+    app = create_app(path, scheduler_config=SchedulerConfig(daily_fetch_enabled=False))
+    with TestClient(app) as client:
+        _wait_startup_settled(app, path, baseline)
         # force=True bypasses the freshness gate so the smoke ALWAYS exercises
         # all six stages (an unforced second run of the day would skip).
         response = client.post("/api/runs/trigger", json={"force": True})
@@ -401,7 +484,13 @@ def _run_cycle(path: Path, start: float) -> SmokeReport:
             f"POST /api/runs/trigger returned {response.status_code}, expected 202 "
             f"(body: {response.text})",
         )
+        _require(
+            response.json().get("already_running") is False,
+            "trigger coalesced into an active run (already_running=true) despite the "
+            "settled startup run — is another process running against this db?",
+        )
         run_id = int(response.json()["run_id"])
+        _wait_run_terminal(path, run_id)
 
         # Verify straight from the db file (the same rows the UI reads).
         conn = storage.open_read_only(path)

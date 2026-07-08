@@ -4,6 +4,10 @@ Real tmp SQLite dbs, seeded through the production ``storage.upsert_row``
 boundary — no mocks. 70 business days is the standard seed: 69 daily returns
 covers both ``MIN_LW_ROWS`` (60, Ledoit-Wolf) and ``MIN_HISTORY_BARS`` (52,
 EWMA).
+
+Also home of :data:`OFFLINE_SCHEDULER` — the ONE shared offline scheduler
+config every suite that boots the lifespan imports (one source of truth;
+code-quality rule).
 """
 
 import sqlite3
@@ -14,11 +18,19 @@ import pandas as pd
 
 from abe import storage
 from abe.constants import UNIVERSE
+from abe.scheduler import SchedulerConfig
 
 DRIFTS = {"SPY": 0.0005, "ACWI": 0.0004, "AGG": 0.0001}
 VOLS = {"SPY": 0.010, "ACWI": 0.011, "AGG": 0.003}
 
 FETCHED_AT = "2026-07-07T00:00:00Z"
+
+OFFLINE_SCHEDULER = SchedulerConfig(daily_fetch_enabled=False)
+"""Production scheduler defaults minus the daily NETWORK fetch. Every offline
+test that enters the app lifespan (or starts a Scheduler against the real
+run_pipeline) must use this — the default config would construct a real
+YFinanceAdapter once the fetch window is due. The fetch job itself is covered
+with fake adapters in tests/test_scheduler.py."""
 
 
 def _upsert_bar(conn: sqlite3.Connection, asset: str, date_key: str, price: float) -> None:

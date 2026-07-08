@@ -3,8 +3,10 @@
  * latest run's id / status / trigger, and a Refresh button that POSTs
  * `/api/runs/trigger {force: true}` and then asks the App to re-poll.
  *
- * The button is disabled while a trigger is in flight (V1 runs the pipeline
- * synchronously inside the request, so "in flight" spans the whole run).
+ * The button is disabled while the POST is in flight. Step 11's trigger
+ * answers 202 at the run's START (not completion), so the button re-enables
+ * quickly; a repeat click during the run coalesces server-side
+ * (`already_running: true`) instead of queuing a second run.
  */
 
 import { useEffect, useState } from "react";

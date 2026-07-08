@@ -22,6 +22,11 @@ import "./App.css";
 
 const POLL_INTERVAL_MS = 7_000; // plan section 6: poll target at 5-10s
 
+// Resolved polls to wait before a still-not-latest triggered run is called a
+// failure (grace for Step 11's answer-at-run-START trigger: poll 1 fires
+// immediately after the 202, while the run is usually still executing).
+const FAILURE_NOTE_POLLS = 2;
+
 type FetchState = "loading" | "empty" | "ready";
 
 export default function App() {
@@ -29,10 +34,11 @@ export default function App() {
   const [state, setState] = useState<FetchState>("loading");
   const [unreachable, setUnreachable] = useState<string | null>(null);
   const [lastTrigger, setLastTrigger] = useState<TriggerResponse | null>(null);
-  // True once at least one poll has RESOLVED after the most recent trigger —
-  // the failure note must not render (or flash) before the post-trigger poll
-  // has actually reported back.
-  const [pollSettledSinceTrigger, setPollSettledSinceTrigger] = useState(true);
+  // Polls RESOLVED since the most recent trigger. Step 11's trigger answers
+  // 202 at the run's START (not completion), so the first post-trigger poll
+  // legitimately still serves the PREVIOUS latest run while the new one
+  // executes — the failure note may only render after the grace below.
+  const [pollsSinceTrigger, setPollsSinceTrigger] = useState(FAILURE_NOTE_POLLS);
   // Bumped after a trigger: re-runs the poll effect (immediate tick + fresh interval).
   const [pollNonce, setPollNonce] = useState(0);
 
@@ -58,7 +64,7 @@ export default function App() {
           );
         }
         setUnreachable(null);
-        setPollSettledSinceTrigger(true);
+        setPollsSinceTrigger((count) => count + 1);
       } catch (error) {
         if (cancelled) {
           return;
@@ -77,24 +83,28 @@ export default function App() {
 
   function handleTriggered(result: TriggerResponse): void {
     setLastTrigger(result);
-    setPollSettledSinceTrigger(false); // suppress the note until a poll resolves
+    setPollsSinceTrigger(0); // arm the grace window (no note flash)
     setPollNonce((nonce) => nonce + 1); // re-poll now
   }
 
-  // A forced trigger that did not become the latest ok run failed (force
-  // bypasses the freshness gate, so it cannot have been skipped). Only shown
-  // after the post-trigger poll resolved (no flash), and cleared forever once
-  // any run_id >= the triggered id is latest (no stale banner under Step 11's
-  // scheduler).
+  // A forced trigger that did not become the latest ok run after the grace
+  // window failed (force bypasses the freshness gate, so it cannot have been
+  // skipped). Step 11's 202 answers at run START, so within the grace the run
+  // is presumed still executing (a neutral in-progress note); the note is
+  // cleared forever once any run_id >= the triggered id is latest (a newer
+  // scheduled/manual ok run must not resurrect an old failure note).
   const triggerNote =
     lastTrigger !== null &&
-    pollSettledSinceTrigger &&
     state !== "loading" &&
     (latest === null || latest.run.run_id < lastTrigger.run_id)
       ? lastTrigger.already_running
         ? `a run was already active (run #${lastTrigger.run_id})`
-        : `triggered run #${lastTrigger.run_id} did not finish ok — check the run ledger ` +
-          `(GET /api/runs/${lastTrigger.run_id}/stages)`
+        : pollsSinceTrigger >= FAILURE_NOTE_POLLS
+          ? `triggered run #${lastTrigger.run_id} did not finish ok — check the run ledger ` +
+            `(GET /api/runs/${lastTrigger.run_id}/stages)`
+          : pollsSinceTrigger >= 1
+            ? `run #${lastTrigger.run_id} started — waiting for it to finish…`
+            : null
       : null;
 
   return (

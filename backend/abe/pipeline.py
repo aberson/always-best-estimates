@@ -602,6 +602,7 @@ def run_pipeline(
     force: bool = False,
     model: WorldModel | None = None,
     macro_status: MacroStatus | None = None,
+    on_run_started: Callable[[int], None] | None = None,
 ) -> int:
     """Execute one pipeline run on the writer connection; return its ``run_id``.
 
@@ -626,6 +627,15 @@ def run_pipeline(
         key configured that makes NO network request; with a key it costs one
         FRED probe per call, which is why long-lived callers pass the cached
         status.
+    on_run_started:
+        Invoked with the ``run_id`` the moment the run has STARTED — the
+        phase-0 ``runs`` row is committed (``status='running'``) and the id
+        exists, but no stage has executed yet. Step 11's scheduler resolves
+        its ``request_run`` handle here (the trigger endpoint returns at run
+        START, not completion). The callback runs on the pipeline thread and
+        must not raise: a raising callback is an infrastructure failure that
+        propagates and leaves this run's ``'running'`` row for the startup
+        sweep.
 
     Stage exceptions are recorded (``runs.status='error'`` + the failing
     stage's ``error`` row) and NEVER propagate; the ledger tells the story.
@@ -655,6 +665,10 @@ def run_pipeline(
     if run_id_raw is None:  # pragma: no cover — INSERT always yields a rowid
         raise RuntimeError("runs insert returned no run_id")
     run_id = int(run_id_raw)
+    if on_run_started is not None:
+        # The run has started: id allocated, 'running' row committed. The
+        # Step 11 scheduler unblocks request_run awaiters here.
+        on_run_started(run_id)
 
     ctx = _RunContext(
         conn=conn,

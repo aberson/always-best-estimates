@@ -11,10 +11,16 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from seeding import OFFLINE_SCHEDULER
 
 from abe.api import FRONTEND_DIST, create_app
 
 MARKER = "step10 fake built frontend"
+
+# These tests boot the lifespan (and its scheduler) against EMPTY tmp dbs, so
+# they use the shared OFFLINE_SCHEDULER (seeding.py) to keep the daily network
+# fetch off. The startup run errors on the empty db — recorded, harmless, and
+# irrelevant to the static-serving contract under test.
 
 
 @pytest.fixture(autouse=True)
@@ -28,7 +34,8 @@ def test_dist_present_serves_index_and_api_routes_win(tmp_path: Path) -> None:
     dist = tmp_path / "dist"
     dist.mkdir()
     (dist / "index.html").write_text(f"<!doctype html><p>{MARKER}</p>", encoding="utf-8")
-    with TestClient(create_app(tmp_path / "abe.db", static_dir=dist)) as client:
+    app = create_app(tmp_path / "abe.db", static_dir=dist, scheduler_config=OFFLINE_SCHEDULER)
+    with TestClient(app) as client:
         # index.html served at / (html=True).
         root = client.get("/")
         assert root.status_code == 200
@@ -43,7 +50,10 @@ def test_dist_present_serves_index_and_api_routes_win(tmp_path: Path) -> None:
 
 
 def test_dist_absent_root_404_while_api_works(tmp_path: Path) -> None:
-    with TestClient(create_app(tmp_path / "abe.db", static_dir=tmp_path / "no-dist")) as client:
+    app = create_app(
+        tmp_path / "abe.db", static_dir=tmp_path / "no-dist", scheduler_config=OFFLINE_SCHEDULER
+    )
+    with TestClient(app) as client:
         assert client.get("/").status_code == 404
         assert client.get("/health").json() == {"status": "ok"}
 
