@@ -328,11 +328,12 @@ class _FailFirstThenReal:
         delta: float,
         gamma_tc: float,
         w_max: float,
+        min_weight: float,
     ) -> tuple[str, np.ndarray | None]:
         self.w_prev_per_call.append(w_prev)
         if len(self.w_prev_per_call) == 1:
             return ("solver_error: injected first-call failure", None)
-        return _solve_once(mu, chol, w_prev, delta, gamma_tc, w_max)
+        return _solve_once(mu, chol, w_prev, delta, gamma_tc, w_max, min_weight)
 
 
 class _AlwaysFail:
@@ -347,6 +348,7 @@ class _AlwaysFail:
         delta: float,
         gamma_tc: float,
         w_max: float,
+        min_weight: float,
     ) -> tuple[str, np.ndarray | None]:
         self.calls += 1
         return (str(cp.INFEASIBLE), None)
@@ -405,8 +407,9 @@ def test_optimal_inaccurate_accepted_with_warning(
         delta: float,
         gamma_tc: float,
         w_max: float,
+        min_weight: float,
     ) -> tuple[str, np.ndarray | None]:
-        status, weights = _solve_once(mu, chol, w_prev, delta, gamma_tc, w_max)
+        status, weights = _solve_once(mu, chol, w_prev, delta, gamma_tc, w_max, min_weight)
         assert status == str(cp.OPTIMAL)
         return (str(cp.OPTIMAL_INACCURATE), weights)
 
@@ -420,6 +423,40 @@ def test_optimal_inaccurate_accepted_with_warning(
     assert result.status == str(cp.OPTIMAL_INACCURATE)
     assert result.relaxed_turnover is False
     assert any("OPTIMAL_INACCURATE" in record.message for record in caplog.records)
+
+
+# --------------------------------------------------------------------------- #
+# min_weight box floor (Track 2 Step 23) — the AGG=0% realism knob
+# --------------------------------------------------------------------------- #
+
+
+def test_min_weight_default_zero_is_v1_behavior() -> None:
+    """min_weight defaults to 0.0 and reproduces the V1 long-only allocation."""
+    sigma = _sigma_well_conditioned()
+    mu = _mu([0.20, 0.20, -0.10])
+    default = optimize_weights(mu, sigma).weights
+    explicit = optimize_weights(mu, sigma, min_weight=0.0).weights
+    assert default == explicit
+
+
+def test_min_weight_floor_yields_nonzero_agg() -> None:
+    sigma = _sigma_well_conditioned()
+    mu = _mu([0.20, 0.20, -0.10])  # AGG unattractive → driven toward 0 unfloored
+    unfloored = optimize_weights(mu, sigma)
+    floored = optimize_weights(mu, sigma, min_weight=0.05)
+    _assert_valid_allocation(floored)
+    for asset in UNIVERSE:
+        assert floored.weights[asset] >= 0.05 - 1e-9  # every asset holds ≥ the floor
+    assert unfloored.weights["AGG"] < 0.05  # the floor is load-bearing
+
+
+def test_min_weight_infeasible_bounds_raise() -> None:
+    sigma = _sigma_well_conditioned()
+    mu = _mu([0.1, 0.1, 0.1])
+    with pytest.raises(ValueError, match="min_weight"):
+        optimize_weights(mu, sigma, min_weight=0.5)  # 0.5 * 3 > 1 (budget infeasible)
+    with pytest.raises(ValueError, match="exceeds w_max"):
+        optimize_weights(mu, sigma, min_weight=0.7)  # > W_MAX = 0.6
 
 
 # --------------------------------------------------------------------------- #

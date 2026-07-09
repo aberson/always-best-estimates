@@ -51,10 +51,11 @@ from abe.calc import (
     realized_vol,
 )
 from abe.config import Config, ViewScenario
-from abe.constants import HORIZON_BARS, UNIVERSE
+from abe.constants import DELTA, HORIZON_BARS, UNIVERSE, W_MAX
 from abe.model import load_model
 from abe.model.base import DEFAULT_HALFLIFE, EWMABaseline, WorldModel
-from abe.optimize.mvu import MVUResult, optimize_weights
+from abe.optimize.min_variance import min_variance_weights
+from abe.optimize.mvu import GAMMA_TC, MVUResult, optimize_weights
 
 __all__ = [
     "FEATURE_BUILDERS",
@@ -283,12 +284,26 @@ class Optimizer(Protocol):
         """Solve for target weights from the BL posterior."""
         ...
 
+    def objective(self) -> dict[str, object]:
+        """The solved objective + constraints, for the stage card (transparency)."""
+        ...
+
+
+def _min_weight_param(params: Mapping[str, object]) -> float:
+    raw = params.get("min_weight", 0.0)
+    if not isinstance(raw, (int, float)):
+        raise ValueError(f"min_weight must be numeric, got {type(raw).__name__}")
+    return float(raw)
+
 
 class MVUOptimizer:
-    """``mvu``: the V1 mean-variance-utility QP. Step 23 adds a ``min_weight``
-    box floor via the param schema."""
+    """``mvu``: the V1 mean-variance-utility QP + an optional ``min_weight`` box
+    floor (0.0 = the V1 long-only behavior, byte-for-byte)."""
 
     key = "mvu"
+
+    def __init__(self, min_weight: float = 0.0) -> None:
+        self._min_weight = min_weight
 
     def optimize(
         self,
@@ -296,18 +311,79 @@ class MVUOptimizer:
         sigma_post: pd.DataFrame,
         w_prev: Mapping[str, float] | None,
     ) -> MVUResult:
-        return optimize_weights(mu_post, sigma_post, w_prev)
+        return optimize_weights(mu_post, sigma_post, w_prev, min_weight=self._min_weight)
+
+    def objective(self) -> dict[str, object]:
+        # min_weight == 0.0 reproduces the V1 card detail BYTE-FOR-BYTE (the Step
+        # 19 parity golden pins this); a positive floor is surfaced additively.
+        detail: dict[str, object] = {
+            "form": "maximize w^T mu - (delta/2) w^T Sigma w - gamma*||w - w_prev||_1",
+            "delta": DELTA,
+            "gamma_tc": GAMMA_TC,
+            "w_max": W_MAX,
+            "constraints": ["sum(w) = 1", "0 <= w <= w_max"],
+        }
+        if self._min_weight > 0.0:
+            detail["min_weight"] = self._min_weight
+            detail["constraints"] = ["sum(w) = 1", "min_weight <= w <= w_max"]
+        return detail
 
 
-def _mvu_factory(_params: Mapping[str, object]) -> Optimizer:
-    return MVUOptimizer()
+class MinVarianceOptimizer:
+    """``min_variance``: the global-minimum-variance portfolio — ignores ``mu``,
+    holds the low-vol asset (AGG), countering the V1 AGG=0% corner."""
+
+    key = "min_variance"
+
+    def __init__(self, min_weight: float = 0.0) -> None:
+        self._min_weight = min_weight
+
+    def optimize(
+        self,
+        mu_post: pd.Series,
+        sigma_post: pd.DataFrame,
+        w_prev: Mapping[str, float] | None,
+    ) -> MVUResult:
+        return min_variance_weights(sigma_post, w_prev, min_weight=self._min_weight)
+
+    def objective(self) -> dict[str, object]:
+        detail: dict[str, object] = {
+            "form": "minimize w^T Sigma w",
+            "w_max": W_MAX,
+            "constraints": ["sum(w) = 1", "0 <= w <= w_max"],
+        }
+        if self._min_weight > 0.0:
+            detail["min_weight"] = self._min_weight
+            detail["constraints"] = ["sum(w) = 1", "min_weight <= w <= w_max"]
+        return detail
+
+
+_MIN_WEIGHT_PARAM: Final[ParamSpec] = ParamSpec(
+    name="min_weight",
+    type="float",
+    default=0.0,
+    description="Per-asset box floor (>0 guarantees every asset, e.g. AGG, a min weight).",
+)
+
+
+def _mvu_factory(params: Mapping[str, object]) -> Optimizer:
+    return MVUOptimizer(min_weight=_min_weight_param(params))
+
+
+def _min_variance_factory(params: Mapping[str, object]) -> Optimizer:
+    return MinVarianceOptimizer(min_weight=_min_weight_param(params))
 
 
 OPTIMIZERS: Final[dict[str, RegistryEntry[Optimizer]]] = {
     "mvu": RegistryEntry(
         factory=_mvu_factory,
-        param_schema=(),
+        param_schema=(_MIN_WEIGHT_PARAM,),
         description="Mean-variance-utility QP with L1 turnover (the V1 optimizer).",
+    ),
+    "min_variance": RegistryEntry(
+        factory=_min_variance_factory,
+        param_schema=(_MIN_WEIGHT_PARAM,),
+        description="Global minimum-variance portfolio (ignores mu; holds low-vol bonds).",
     ),
 }
 

@@ -111,6 +111,23 @@ def test_mvu_optimizer_works() -> None:
     assert sum(result.weights.values()) == pytest.approx(1.0)
 
 
+def test_mvu_optimizer_min_weight_param_and_objective() -> None:
+    tuned = registry.OPTIMIZERS["mvu"].factory({"min_weight": 0.05})
+    assert tuned.objective()["min_weight"] == 0.05
+    # the default (no param) objective has NO min_weight key — byte-identical to V1
+    assert "min_weight" not in registry.OPTIMIZERS["mvu"].factory({}).objective()
+
+
+def test_min_variance_optimizer_resolves() -> None:
+    optimizer = registry.OPTIMIZERS["min_variance"].factory({})
+    assert optimizer.key == "min_variance"
+    mu_post, sigma_post = _bl_posterior()
+    result = optimizer.optimize(mu_post, sigma_post, None)
+    assert set(result.weights) == set(UNIVERSE)
+    assert sum(result.weights.values()) == pytest.approx(1.0)
+    assert "minimize" in str(optimizer.objective()["form"])
+
+
 # --------------------------------------------------------------------------- #
 # resolve() — the central config yields the V1 stack; unknown keys fail loud
 # --------------------------------------------------------------------------- #
@@ -173,7 +190,7 @@ def test_registries_manifest_shape() -> None:
     assert set(manifest["feature_set"]) == {"basic"}
     assert set(manifest["forecaster"]) == {"ewma", "jepa"}
     assert set(manifest["view_source"]) == {"forecast", "historical", "counterfactual"}
-    assert set(manifest["optimizer"]) == {"mvu"}
+    assert set(manifest["optimizer"]) == {"mvu", "min_variance"}
     ewma_params = {p["name"] for p in manifest["forecaster"]["ewma"]["params"]}  # type: ignore[index]
     assert "halflife" in ewma_params
     jepa_params = {p["name"] for p in manifest["forecaster"]["jepa"]["params"]}  # type: ignore[index]

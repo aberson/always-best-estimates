@@ -248,6 +248,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `min_weight` support in `optimize/mvu.py`, a new optimizer module, registrations.
 - **Done when:** a test shows `min_weight>0` yields a non-zero AGG; the alternative optimizer produces a valid long-only Σ=1 allocation; anchor tests (no-view ⇒ prior, garbage scored low) still hold; `uv run pytest` green.
 - **Depends on:** 18
+- **Status:** DONE (2026-07-08)
 
 ### Step 24: Selectable feature sets
 - **Problem:** Generalize `_stage_features` to resolve its feature builder from the registry, exposing the existing `build_features` (frac-diff + macro) path as a selectable feature set alongside `basic` (log_return + realized_vol). The central Config keeps `basic`.

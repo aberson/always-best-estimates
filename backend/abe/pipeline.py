@@ -132,11 +132,10 @@ from abe import config as config_module
 from abe import registry, storage
 from abe.blend.black_litterman import BLResult, bl_blend
 from abe.blend.covariance import ledoit_wolf_sigma
-from abe.constants import DELTA, HORIZON_BARS, UNIVERSE, W_MAX
+from abe.constants import HORIZON_BARS, UNIVERSE
 from abe.ingest.macro import MacroStatus, load_fred_api_key, probe_fred_key
 from abe.ingest.sources import PRICE_PROVIDER_LABEL, CacheAdapter, utc_now_iso
 from abe.model.base import Forecast, WorldModel
-from abe.optimize.mvu import GAMMA_TC
 
 __all__ = [
     "STAGES",
@@ -651,18 +650,10 @@ def _stage_optimize(ctx: _RunContext) -> tuple[str, dict[str, object]]:
         "relaxed_turnover": result.relaxed_turnover,
         "solver_status": result.status,
         "cold_start": result.prev_weights is None,
-        # The objective the card explains — parameters sourced from the real
-        # constants (imported, never inlined) so the card can never drift from
-        # what optimize_weights actually solved.
-        "objective": {
-            # ASCII math, matching calc.py's mvu_objective explanation and the
-            # repo-wide convention (mvu.py docstring) — one rendering of the form.
-            "form": "maximize w^T mu - (delta/2) w^T Sigma w - gamma*||w - w_prev||_1",
-            "delta": DELTA,
-            "gamma_tc": GAMMA_TC,
-            "w_max": W_MAX,
-            "constraints": ["sum(w) = 1", "0 <= w <= w_max"],
-        },
+        # The RESOLVED optimizer owns its objective card detail — so a min-variance
+        # config shows "minimize w^T Sigma w", not the MVU form. For the central
+        # (mvu, min_weight=0) this is byte-identical to V1 (Step 19 parity golden).
+        "objective": ctx.stack.optimizer.objective(),
     }
     return ("ok", detail)
 

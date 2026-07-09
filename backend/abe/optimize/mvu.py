@@ -85,6 +85,7 @@ __all__ = [
     "WEIGHT_CLIP",
     "MVUResult",
     "optimize_weights",
+    "validate_box",
 ]
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,7 @@ _SolveOnceFn = Callable[
         float,  # delta
         float,  # gamma_tc
         float,  # w_max
+        float,  # min_weight (box floor; 0.0 = long-only w >= 0)
     ],
     tuple[str, npt.NDArray[np.float64] | None],
 ]
@@ -257,6 +259,32 @@ def _validate_w_prev(w_prev: Mapping[str, float]) -> npt.NDArray[np.float64]:
     return vector
 
 
+def validate_box(w_max: float, min_weight: float) -> None:
+    """Validate the box constraint bounds (shared by MVU + min-variance).
+
+    ``w_max`` finite, in ``(0, 1]``, and large enough that ``w_max * N >= 1``
+    (else the budget is infeasible). ``min_weight`` finite, in ``[0, w_max]``,
+    and small enough that ``min_weight * N <= 1`` (else the floors overflow the
+    budget). Config bugs surface HERE, not as a solver status to retry."""
+    n = len(UNIVERSE)
+    if not math.isfinite(w_max) or not 0.0 < w_max <= 1.0:
+        raise ValueError(f"w_max must be finite and in (0, 1], got {w_max!r}")
+    if w_max * n < 1.0:
+        raise ValueError(
+            f"w_max={w_max!r} makes the budget constraint infeasible: "
+            f"{n} assets capped at {w_max!r} cannot sum to 1"
+        )
+    if not math.isfinite(min_weight) or min_weight < 0.0:
+        raise ValueError(f"min_weight must be finite and >= 0, got {min_weight!r}")
+    if min_weight > w_max:
+        raise ValueError(f"min_weight={min_weight!r} exceeds w_max={w_max!r}")
+    if min_weight * n > 1.0:
+        raise ValueError(
+            f"min_weight={min_weight!r} makes the budget infeasible: "
+            f"{n} assets floored at {min_weight!r} exceed sum 1"
+        )
+
+
 def _cholesky_with_jitter(sigma: npt.NDArray[np.float64]) -> npt.NDArray[np.float64]:
     """Lower-triangular Cholesky factor of a PSD-but-possibly-boundary matrix.
 
@@ -296,14 +324,17 @@ def _solve_once(
     delta: float,
     gamma_tc: float,
     w_max: float,
+    min_weight: float,
 ) -> tuple[str, npt.NDArray[np.float64] | None]:
     """One CLARABEL solve. Returns ``(status, weights)``; ``weights=None`` = not accepted.
 
     ``w_prev=None`` means the turnover term is DROPPED from the objective
-    (cold start, or the relaxed retry). A raising solver is folded into the
-    status string (``"solver_error: ..."``) so the retry policy in
-    :func:`optimize_weights` sees every failure mode through one shape — this
-    function is also the injection seam that policy is unit-tested through.
+    (cold start, or the relaxed retry). ``min_weight`` is the box floor
+    (``w >= min_weight``; 0.0 reproduces the V1 long-only ``w >= 0`` exactly). A
+    raising solver is folded into the status string (``"solver_error: ..."``) so
+    the retry policy in :func:`optimize_weights` sees every failure mode through
+    one shape — this function is also the injection seam that policy is
+    unit-tested through.
     """
     w = cp.Variable(len(UNIVERSE))
     # sum_squares(chol.T @ w) == w' Sigma w, convex WITHOUT quad_form's
@@ -314,7 +345,7 @@ def _solve_once(
         utility = utility - gamma_tc * norm1(w - w_prev)
     problem = cp.Problem(
         cp.Maximize(utility),
-        [cvx_sum(w) == 1.0, w >= 0.0, w <= w_max],
+        [cvx_sum(w) == 1.0, w >= min_weight, w <= w_max],
     )
     try:
         problem.solve(solver=SOLVER)  # type: ignore[no-untyped-call]  # cvxpy ships solve untyped
@@ -396,6 +427,7 @@ def optimize_weights(
     delta: float = DELTA,
     gamma_tc: float = GAMMA_TC,
     w_max: float = W_MAX,
+    min_weight: float = 0.0,
     *,
     _solve_once_fn: _SolveOnceFn = _solve_once,
 ) -> MVUResult:
@@ -433,17 +465,11 @@ def optimize_weights(
         raise ValueError(f"delta must be finite and > 0, got {delta!r}")
     if not math.isfinite(gamma_tc) or gamma_tc < 0.0:
         raise ValueError(f"gamma_tc must be finite and >= 0, got {gamma_tc!r}")
-    if not math.isfinite(w_max) or not 0.0 < w_max <= 1.0:
-        raise ValueError(f"w_max must be finite and in (0, 1], got {w_max!r}")
-    if w_max * len(UNIVERSE) < 1.0:
-        raise ValueError(
-            f"w_max={w_max!r} makes the budget constraint infeasible: "
-            f"{len(UNIVERSE)} assets capped at {w_max!r} cannot sum to 1"
-        )
+    validate_box(w_max, min_weight)
 
     chol = _cholesky_with_jitter(sigma)
 
-    status, raw = _solve_once_fn(mu, chol, w_prev_vector, delta, gamma_tc, w_max)
+    status, raw = _solve_once_fn(mu, chol, w_prev_vector, delta, gamma_tc, w_max, min_weight)
     relaxed_turnover = False
     if raw is None and w_prev_vector is not None:
         # Retry ONCE without the turnover term (plan section 8's
@@ -452,7 +478,7 @@ def optimize_weights(
         logger.warning(
             "MVU solve failed with turnover term (status %r); retrying without it", status
         )
-        retry_status, raw = _solve_once_fn(mu, chol, None, delta, gamma_tc, w_max)
+        retry_status, raw = _solve_once_fn(mu, chol, None, delta, gamma_tc, w_max, min_weight)
         if raw is None:
             raise RuntimeError(
                 f"MVU optimization failed: status {status!r} with turnover term, "
