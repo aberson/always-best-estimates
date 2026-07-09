@@ -24,3 +24,6 @@ frontend/dist/
 
 # plan-expedite resume state
 .plan-expedite-state*
+
+# plan-expedite resume state (transient)
+.plan-expedite-state
