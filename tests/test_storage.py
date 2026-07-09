@@ -5,6 +5,7 @@ the production entry point is N/A this step (pipeline arrives Step 8); storage
 is the leaf, so direct tests are correct here.
 """
 
+import hashlib
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -13,7 +14,7 @@ import numpy as np
 import pytest
 import torch
 
-from abe import constants, storage
+from abe import constants, migrations, storage
 
 EXPECTED_TABLES = {
     "runs",
@@ -24,6 +25,9 @@ EXPECTED_TABLES = {
     "forecasts",
     "bl_posteriors",
     "target_weights",
+    # v2 (Track 2) tables
+    "configs",
+    "view_scenarios",
 }
 
 
@@ -347,3 +351,256 @@ def test_storage_universe_is_constants_universe() -> None:
     """`is`-identity regression: storage must reference THE constants object,
     so any future re-duplication of the universe fails CI."""
     assert storage.UNIVERSE is constants.UNIVERSE
+
+
+# --------------------------------------------------------------------------- #
+# Migration framework (Track 2 Step 16): v1 -> v2, fresh-at-v2, drift guard
+# --------------------------------------------------------------------------- #
+
+
+def _build_v1_db(db_path: Path) -> sqlite3.Connection:
+    """Open a raw connection at exactly the pre-Track-2 v1 schema — the state an
+    OLD ``open_writer`` left on disk: v1 tables, ``user_version = 1``, NO
+    configs/view_scenarios, NO ``runs.config_id``."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path, isolation_level=None)
+    conn.execute("PRAGMA foreign_keys = ON")
+    migrations.MIGRATIONS[0][1](conn)  # the v0 -> v1 delta only
+    conn.execute("PRAGMA user_version = 1")
+    return conn
+
+
+def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
+    return {str(row[1]) for row in conn.execute(f'PRAGMA table_info("{table}")')}
+
+
+def _table_layout(conn: sqlite3.Connection, table: str) -> list[tuple[object, ...]]:
+    # (name, type, notnull, pk) — the normalized column facts, order-stable.
+    rows = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
+    return [(row[1], row[2], row[3], row[5]) for row in rows]
+
+
+def _tables(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+
+
+def _indexes(conn: sqlite3.Connection) -> set[str]:
+    return {
+        str(row[0])
+        for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name NOT LIKE 'sqlite_%'"
+        )
+    }
+
+
+def _foreign_keys(conn: sqlite3.Connection, table: str) -> set[tuple[object, ...]]:
+    # (referenced_table, from_column, to_column) per foreign_key_list row.
+    return {
+        (row[2], row[3], row[4]) for row in conn.execute(f'PRAGMA foreign_key_list("{table}")')
+    }
+
+
+def test_target_version_is_two() -> None:
+    assert storage.SCHEMA_VERSION == 2
+    assert migrations.TARGET_VERSION == 2
+
+
+def test_all_tables_match_built_schema(writer: sqlite3.Connection) -> None:
+    """The hand-maintained ALL_TABLES name registry must equal what the
+    migrations actually build — a drift guard between names and DDL."""
+    assert set(storage.ALL_TABLES) == _tables(writer)
+    assert storage.TABLES == frozenset(storage.ALL_TABLES)
+
+
+def test_fresh_db_opens_at_v2(writer: sqlite3.Connection) -> None:
+    assert writer.execute("PRAGMA user_version").fetchone()[0] == 2
+    assert writer.execute("SELECT COUNT(*) FROM configs WHERE is_central = 1").fetchone()[0] == 1
+    kinds = {str(row[0]) for row in writer.execute("SELECT kind FROM view_scenarios")}
+    assert kinds == {"forecast"}
+    name, feature_set, forecaster, optimizer = writer.execute(
+        "SELECT name, feature_set, forecaster, optimizer FROM configs WHERE is_central = 1"
+    ).fetchone()
+    assert (name, feature_set, forecaster, optimizer) == (
+        migrations.CENTRAL_CONFIG_NAME,
+        "basic",
+        "ewma",
+        "mvu",
+    )
+
+
+def test_migrate_v1_to_v2_preserves_rows_and_backfills(db_path: Path) -> None:
+    conn = _build_v1_db(db_path)
+    try:
+        assert "config_id" not in _columns(conn, "runs")  # v1 has no config_id
+        assert "configs" not in _tables(conn)
+        conn.execute(
+            'INSERT INTO runs (started_at_utc, status, "trigger") VALUES (?, ?, ?)',
+            ("2026-07-07T00:00:00Z", "ok", "manual"),
+        )
+        conn.execute(
+            'INSERT INTO runs (started_at_utc, status, "trigger") VALUES (?, ?, ?)',
+            ("2026-07-07T00:05:00Z", "ok", "schedule"),
+        )
+        conn.execute("INSERT INTO run_stages (run_id, stage, status) VALUES (1, 'freshness', 'ok')")
+        before = conn.execute(
+            "SELECT run_id, started_at_utc, status FROM runs ORDER BY run_id"
+        ).fetchall()
+
+        storage.ensure_schema(conn)  # v1 -> v2
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == storage.SCHEMA_VERSION
+        after = conn.execute(
+            "SELECT run_id, started_at_utc, status FROM runs ORDER BY run_id"
+        ).fetchall()
+        assert after == before  # zero row loss
+        assert conn.execute("SELECT COUNT(*) FROM run_stages").fetchone()[0] == 1
+        central = conn.execute(
+            "SELECT config_id FROM configs WHERE is_central = 1"
+        ).fetchall()
+        assert len(central) == 1
+        central_id = central[0][0]
+        # every pre-existing run backfilled to the central config
+        backfilled = {row[0] for row in conn.execute("SELECT config_id FROM runs")}
+        assert backfilled == {central_id}
+    finally:
+        conn.close()
+
+
+# The v1 schema is FROZEN history: real on-disk dbs at user_version 1 carry
+# exactly this shape, so _migrate_v0_to_v1 must reproduce it forever. This
+# fingerprint is a committed golden captured INDEPENDENTLY of migrations.py's
+# source — editing the frozen _V1_TABLE_DDL/_V1_INDEX_DDL changes the computed
+# hash and trips test_frozen_v1_schema_is_golden, forcing a deliberate
+# acknowledgement that historical schema (which live migrations must handle) is
+# being changed. This is the real measurement-validity anchor: it CAN fail on
+# the drift it names (unlike test_fresh_and_migrated_schema_equivalent, whose
+# two paths run the same functions and so agree by construction).
+_V1_SCHEMA_SHA256 = "eeb0f46dc9aa525db448d459cd955139e65192943dc9cecdd260f4de6ee8a303"
+
+
+def _v1_schema_fingerprint(conn: sqlite3.Connection) -> str:
+    tables = sorted(_tables(conn))
+    parts = [
+        (table, tuple(_table_layout(conn, table)), tuple(sorted(_foreign_keys(conn, table))))
+        for table in tables
+    ]
+    canon = repr((tuple(parts), tuple(sorted(_indexes(conn)))))
+    return hashlib.sha256(canon.encode()).hexdigest()
+
+
+def test_frozen_v1_schema_is_golden(db_path: Path) -> None:
+    conn = _build_v1_db(db_path)
+    try:
+        assert _v1_schema_fingerprint(conn) == _V1_SCHEMA_SHA256, (
+            "frozen v1 schema changed — real on-disk v1 dbs carry the OLD shape; "
+            "if intentional, migrations must handle the difference and this golden "
+            "must be updated deliberately"
+        )
+    finally:
+        conn.close()
+
+
+def test_fresh_and_migrated_schema_equivalent(tmp_path: Path) -> None:
+    """Path-independence consistency check: a db built fresh at v2 and a db
+    migrated v1 -> v2 land on identical schemas (tables, columns, FKs, indexes,
+    version). Both paths run the same migration functions, so this AGREES by
+    construction — the teeth against frozen-v1 drift live in
+    test_frozen_v1_schema_is_golden; this guards apply()'s path-independence and
+    that config_id's FK really lands via ALTER."""
+    fresh = storage.open_writer(tmp_path / "fresh" / "abe.db")
+    migrated = _build_v1_db(tmp_path / "migrated" / "abe.db")
+    try:
+        storage.ensure_schema(migrated)  # v1 -> v2
+        assert _tables(fresh) == _tables(migrated)
+        assert _indexes(fresh) == _indexes(migrated)
+        assert (
+            fresh.execute("PRAGMA user_version").fetchone()[0]
+            == migrated.execute("PRAGMA user_version").fetchone()[0]
+        )
+        for table in sorted(_tables(fresh)):
+            assert _table_layout(fresh, table) == _table_layout(migrated, table), table
+            assert _foreign_keys(fresh, table) == _foreign_keys(migrated, table), table
+        # config_id's FK really landed (both inline-free paths ALTER it in)
+        assert ("configs", "config_id", "config_id") in _foreign_keys(fresh, "runs")
+    finally:
+        fresh.close()
+        migrated.close()
+
+
+def test_migrate_idempotent_on_v2(writer: sqlite3.Connection) -> None:
+    storage.ensure_schema(writer)  # already v2 → no-op
+    storage.ensure_schema(writer)
+    assert writer.execute("PRAGMA user_version").fetchone()[0] == storage.SCHEMA_VERSION
+    assert writer.execute("SELECT COUNT(*) FROM configs WHERE is_central = 1").fetchone()[0] == 1
+    assert writer.execute("SELECT COUNT(*) FROM view_scenarios").fetchone()[0] == 1
+
+
+def test_single_central_invariant(writer: sqlite3.Connection) -> None:
+    """The partial unique index enforces at most one is_central = 1 row."""
+    with pytest.raises(sqlite3.IntegrityError):
+        writer.execute(
+            "INSERT INTO configs (name, feature_set, forecaster, view_scenario_id, "
+            "optimizer, is_central, created_at_utc) "
+            "VALUES ('rival', 'basic', 'ewma', 1, 'mvu', 1, '2026-07-08T00:00:00Z')"
+        )
+
+
+def test_config_id_fk_rejects_orphan_run(writer: sqlite3.Connection) -> None:
+    with pytest.raises(sqlite3.IntegrityError):
+        storage.insert_row(
+            writer,
+            "runs",
+            {
+                "started_at_utc": "2026-07-08T00:00:00Z",
+                "status": "ok",
+                "trigger": "manual",
+                "config_id": 9999,
+            },
+        )
+
+
+def test_run_tagged_with_central_config_id(writer: sqlite3.Connection) -> None:
+    central_id = writer.execute("SELECT config_id FROM configs WHERE is_central = 1").fetchone()[0]
+    run_id = storage.insert_row(
+        writer,
+        "runs",
+        {
+            "started_at_utc": "2026-07-08T00:00:00Z",
+            "status": "ok",
+            "trigger": "manual",
+            "config_id": central_id,
+        },
+    )
+    assert (
+        writer.execute("SELECT config_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()[0]
+        == central_id
+    )
+
+
+def test_configs_insert_through_coercion_boundary(writer: sqlite3.Connection) -> None:
+    """The new tables are accepted by the insert boundary (ALL_TABLES allow-list)."""
+    vs_id = writer.execute("SELECT view_scenario_id FROM view_scenarios LIMIT 1").fetchone()[0]
+    config_id = storage.insert_row(
+        writer,
+        "configs",
+        {
+            "name": "alt",
+            "feature_set": "basic",
+            "forecaster": "jepa",
+            "view_scenario_id": vs_id,
+            "optimizer": "mvu",
+            "params_json": None,
+            "is_central": 0,
+            "created_at_utc": "2026-07-08T00:00:00Z",
+        },
+    )
+    assert config_id is not None
+    row = writer.execute(
+        "SELECT name, forecaster, is_central FROM configs WHERE config_id = ?", (config_id,)
+    ).fetchone()
+    assert row == ("alt", "jepa", 0)

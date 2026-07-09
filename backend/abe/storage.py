@@ -1,6 +1,9 @@
-"""SQLite storage layer: connections, PRAGMAs, schema DDL (v1), coercion boundary.
+"""SQLite storage layer: connections, PRAGMAs, coercion boundary, table registry.
 
 plan.md section 3 (Data Store) is the authoritative spec for everything here.
+Schema DDL + the forward-only migration framework live in :mod:`abe.migrations`
+(Track 2 Step 16); this module owns the table-name allow-list (:data:`ALL_TABLES`),
+the connection/PRAGMA setup, the coercion boundary, and the insert helpers.
 
 One-writer discipline: the pipeline thread owns THE single writer connection
 (``open_writer``; ownership lands in Step 8). The API layer reads through
@@ -28,9 +31,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Final
 
+from abe import migrations
 from abe.constants import UNIVERSE
 
 __all__ = [
+    "ALL_TABLES",
     "DEFAULT_DB_PATH",
     "SCHEMA_VERSION",
     "TABLES",
@@ -51,121 +56,37 @@ SQLiteScalar = int | float | str | bytes | None
 DEFAULT_DB_PATH: Final[Path] = Path("data") / "abe.db"
 """Default DB location, relative to the project root (the process cwd)."""
 
-SCHEMA_VERSION: Final[int] = 1
-"""Stamped into ``PRAGMA user_version`` by :func:`ensure_schema`."""
+SCHEMA_VERSION: Final[int] = migrations.TARGET_VERSION
+"""Target schema version (one per migration in :mod:`abe.migrations`). Stamped
+into ``PRAGMA user_version`` by :func:`ensure_schema`."""
 
 # --------------------------------------------------------------------------- #
-# Schema DDL (v1) — plan.md section 3. One source of truth: table + index DDL
-# live ONLY here; insert helpers derive column/PK facts from the live schema
-# via PRAGMA table_info, so nothing below is duplicated in Python constants.
+# Table-name registry. ONE source of truth for the set of tables the insert
+# boundary accepts; the DDL that CREATES them lives (frozen per version) in
+# abe.migrations. Column/PK facts are read from the LIVE schema (PRAGMA
+# table_info), never from a Python copy of the DDL — nothing here duplicates a
+# column list, and this list stays in lockstep with the migrations that build it
+# (asserted by tests/test_storage.py::test_all_tables_match_built_schema).
 # --------------------------------------------------------------------------- #
 
-_SCHEMA_DDL: Final[dict[str, str]] = {
-    "runs": """
-        CREATE TABLE IF NOT EXISTS runs (
-            run_id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            started_at_utc  TEXT NOT NULL,
-            finished_at_utc TEXT,
-            status          TEXT NOT NULL
-                CHECK (status IN ('queued', 'running', 'ok', 'error', 'skipped')),
-            "trigger"       TEXT NOT NULL
-                CHECK ("trigger" IN ('schedule', 'manual', 'startup')),
-            error_text      TEXT
-        )
-    """,
-    "run_stages": """
-        CREATE TABLE IF NOT EXISTS run_stages (
-            run_id          INTEGER NOT NULL REFERENCES runs(run_id),
-            stage           TEXT NOT NULL,
-            status          TEXT NOT NULL,
-            started_at_utc  TEXT,
-            finished_at_utc TEXT,
-            detail_json     TEXT,
-            PRIMARY KEY (run_id, stage)
-        )
-    """,
-    "prices": """
-        CREATE TABLE IF NOT EXISTS prices (
-            asset          TEXT NOT NULL,
-            date           TEXT NOT NULL,
-            open           REAL,
-            high           REAL,
-            low            REAL,
-            close          REAL,
-            adj_close      REAL,
-            volume         INTEGER,
-            source         TEXT NOT NULL CHECK (source IN ('yfinance', 'cache')),
-            fetched_at_utc TEXT NOT NULL,
-            PRIMARY KEY (asset, date)
-        )
-    """,
-    "macro": """
-        CREATE TABLE IF NOT EXISTS macro (
-            series_id       TEXT NOT NULL,
-            obs_date        TEXT NOT NULL,
-            value           REAL,
-            available_date  TEXT NOT NULL,
-            ingested_at_utc TEXT NOT NULL,
-            PRIMARY KEY (series_id, obs_date)
-        )
-    """,
-    "features": """
-        CREATE TABLE IF NOT EXISTS features (
-            run_id INTEGER NOT NULL REFERENCES runs(run_id),
-            asset  TEXT NOT NULL,
-            name   TEXT NOT NULL,
-            value  REAL,
-            PRIMARY KEY (run_id, asset, name)
-        )
-    """,
-    "forecasts": """
-        CREATE TABLE IF NOT EXISTS forecasts (
-            run_id        INTEGER NOT NULL REFERENCES runs(run_id),
-            asset         TEXT NOT NULL,
-            horizon_days  INTEGER NOT NULL,
-            mu            REAL NOT NULL,
-            sigma         REAL NOT NULL,
-            model_version TEXT NOT NULL,
-            PRIMARY KEY (run_id, asset)
-        )
-    """,
-    "bl_posteriors": """
-        CREATE TABLE IF NOT EXISTS bl_posteriors (
-            run_id          INTEGER NOT NULL REFERENCES runs(run_id),
-            asset           TEXT NOT NULL,
-            prior_mu        REAL NOT NULL,
-            view_mu         REAL NOT NULL,
-            view_confidence REAL NOT NULL,
-            posterior_mu    REAL NOT NULL,
-            posterior_sigma REAL NOT NULL,
-            detail_json     TEXT,
-            PRIMARY KEY (run_id, asset)
-        )
-    """,
-    "target_weights": """
-        CREATE TABLE IF NOT EXISTS target_weights (
-            run_id           INTEGER NOT NULL REFERENCES runs(run_id),
-            asset            TEXT NOT NULL,
-            weight           REAL NOT NULL,
-            prev_weight      REAL,
-            turnover         REAL,
-            relaxed_turnover INTEGER NOT NULL DEFAULT 0
-                CHECK (relaxed_turnover IN (0, 1)),
-            PRIMARY KEY (run_id, asset)
-        )
-    """,
-}
-
-_INDEX_DDL: Final[tuple[str, ...]] = (
-    "CREATE INDEX IF NOT EXISTS idx_runs_status_run_id ON runs (status, run_id)",
-    "CREATE INDEX IF NOT EXISTS idx_features_asset_run_id ON features (asset, run_id)",
-    "CREATE INDEX IF NOT EXISTS idx_forecasts_asset_run_id ON forecasts (asset, run_id)",
-    "CREATE INDEX IF NOT EXISTS idx_bl_posteriors_asset_run_id ON bl_posteriors (asset, run_id)",
-    "CREATE INDEX IF NOT EXISTS idx_target_weights_asset_run_id ON target_weights (asset, run_id)",
+ALL_TABLES: Final[tuple[str, ...]] = (
+    # v1 (single-config) tables
+    "runs",
+    "run_stages",
+    "prices",
+    "macro",
+    "features",
+    "forecasts",
+    "bl_posteriors",
+    "target_weights",
+    # v2 (Track 2 pluggable-engine) tables
+    "configs",
+    "view_scenarios",
 )
 
-TABLES: Final[frozenset[str]] = frozenset(_SCHEMA_DDL)
-"""All v1 table names (derived from the DDL — do not redefine elsewhere)."""
+TABLES: Final[frozenset[str]] = frozenset(ALL_TABLES)
+"""All current table names (the insert-boundary allow-list — do not redefine
+elsewhere)."""
 
 
 # --------------------------------------------------------------------------- #
@@ -221,14 +142,13 @@ def open_read_only(db_path: str | Path = DEFAULT_DB_PATH) -> sqlite3.Connection:
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create the v1 schema from scratch. Idempotent (CREATE ... IF NOT EXISTS)."""
-    for table_ddl in _SCHEMA_DDL.values():
-        conn.execute(table_ddl)
-    for index_ddl in _INDEX_DDL:
-        conn.execute(index_ddl)
-    row = conn.execute("PRAGMA user_version").fetchone()
-    if int(row[0]) < SCHEMA_VERSION:
-        conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION:d}")
+    """Bring the connection's schema up to :data:`SCHEMA_VERSION`.
+
+    Delegates to :func:`abe.migrations.apply`: a fresh db runs every migration in
+    order (v0 -> v1 -> v2 -> ...); an existing db runs only those past its
+    stamped ``user_version``. Idempotent — safe to call on every ``open_writer``.
+    """
+    migrations.apply(conn)
 
 
 def wal_checkpoint_truncate(conn: sqlite3.Connection) -> tuple[int, int, int]:
@@ -309,11 +229,11 @@ def _coerce_scalar(value: object, allow_item: bool) -> SQLiteScalar:
 def _validated_columns(conn: sqlite3.Connection, table: str) -> dict[str, bool]:
     """Map column name → is-primary-key for a known table, from the live schema.
 
-    The membership check against the DDL registry (``_SCHEMA_DDL``) also makes
-    the interpolated identifiers injection-proof.
+    The membership check against the table-name registry (:data:`TABLES`) also
+    makes the interpolated identifiers injection-proof.
     """
-    if table not in _SCHEMA_DDL:
-        raise ValueError(f"unknown table {table!r}; known tables: {sorted(_SCHEMA_DDL)}")
+    if table not in TABLES:
+        raise ValueError(f"unknown table {table!r}; known tables: {sorted(TABLES)}")
     rows = conn.execute(f'PRAGMA table_info("{table}")').fetchall()
     if not rows:
         raise ValueError(f"table {table!r} does not exist; call ensure_schema() first")

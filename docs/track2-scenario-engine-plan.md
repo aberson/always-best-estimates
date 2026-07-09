@@ -174,6 +174,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `backend/abe/migrations.py` (or `storage` submodule), v2 DDL, `SCHEMA_VERSION=2`.
 - **Done when:** a test migrates a seeded v1 db to v2 with zero row loss and `config_id` backfilled; a fresh db opens at v2; `uv run pytest tests/test_storage.py` green.
 - **Depends on:** none
+- **Status:** DONE (2026-07-08)
 
 ### Step 17: Config + ViewScenario domain model + storage CRUD + seeded central Config
 - **Problem:** Add `backend/abe/config.py` with typed `Config` and `ViewScenario` entities + storage CRUD (through the existing coercion boundary). Seed the default **central** Config (basic features + EWMA + forecast views + MVU, today's params) and a default `forecast` ViewScenario on first migration.
