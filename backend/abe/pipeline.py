@@ -128,20 +128,15 @@ from typing import Final
 
 import pandas as pd
 
-from abe import storage
+from abe import config as config_module
+from abe import registry, storage
 from abe.blend.black_litterman import BLResult, bl_blend
 from abe.blend.covariance import ledoit_wolf_sigma
-from abe.calc import (
-    LOG_RETURN_COLUMN,
-    REALIZED_VOL_COLUMN,
-    log_returns,
-    realized_vol,
-)
 from abe.constants import DELTA, HORIZON_BARS, UNIVERSE, W_MAX
 from abe.ingest.macro import MacroStatus, load_fred_api_key, probe_fred_key
 from abe.ingest.sources import PRICE_PROVIDER_LABEL, CacheAdapter, utc_now_iso
-from abe.model.base import EWMABaseline, Forecast, WorldModel
-from abe.optimize.mvu import GAMMA_TC, optimize_weights
+from abe.model.base import Forecast, WorldModel
+from abe.optimize.mvu import GAMMA_TC
 
 __all__ = [
     "STAGES",
@@ -315,7 +310,7 @@ class _RunContext:
     run_id: int
     db_path: Path
     force: bool
-    model: WorldModel
+    stack: registry.ResolvedStack
     macro_status: MacroStatus
     skip: bool = False
     frames: dict[str, pd.DataFrame] = field(default_factory=dict)
@@ -469,38 +464,19 @@ def _stage_ingest(ctx: _RunContext) -> tuple[str, dict[str, object]]:
 
 
 def _stage_features(ctx: _RunContext) -> tuple[str, dict[str, object]]:
-    latest: dict[str, dict[str, object]] = {}
-    for asset in UNIVERSE:
-        returns = log_returns(ctx.frames[asset]["adj_close"])
-        vol = realized_vol(returns)
-        ctx.returns[asset] = returns
-        ctx.features_frames[asset] = returns.to_frame()
-        values = {
-            LOG_RETURN_COLUMN: float(returns.iloc[-1]),
-            REALIZED_VOL_COLUMN: float(vol.iloc[-1]),
-        }
-        for name, value in values.items():
-            storage.insert_row(
-                ctx.conn,
-                "features",
-                {"run_id": ctx.run_id, "asset": asset, "name": name, "value": value},
-            )
-        latest[asset] = {"date": str(returns.index[-1]), **values}
-    detail: dict[str, object] = {
-        "features": [LOG_RETURN_COLUMN, REALIZED_VOL_COLUMN],
-        # Per-feature lookback so the card can say what each number spans.
-        # HORIZON_BARS is the realized-vol window (also the forecast horizon).
-        "windows": {
-            LOG_RETURN_COLUMN: "1 day",
-            REALIZED_VOL_COLUMN: f"{HORIZON_BARS} days, annualized",
-        },
-        "latest": latest,
-    }
-    return ("ok", detail)
+    # The resolved feature builder owns the math + the card detail; the pipeline
+    # owns persistence (adding run_id) and threading returns/frames downstream.
+    bundle = ctx.stack.feature_builder.build(ctx.frames)
+    ctx.returns = dict(bundle.returns)
+    ctx.features_frames = dict(bundle.features_frames)
+    for row in bundle.rows:
+        storage.insert_row(ctx.conn, "features", {"run_id": ctx.run_id, **row})
+    return ("ok", bundle.detail)
 
 
 def _stage_forecast(ctx: _RunContext) -> tuple[str, dict[str, object]]:
-    ctx.forecasts = ctx.model.forecast(ctx.features_frames)
+    forecaster = ctx.stack.forecaster
+    ctx.forecasts = forecaster.forecast(ctx.features_frames)
     per_asset: dict[str, dict[str, float]] = {}
     for asset in UNIVERSE:
         forecast = ctx.forecasts[asset]
@@ -513,12 +489,12 @@ def _stage_forecast(ctx: _RunContext) -> tuple[str, dict[str, object]]:
                 "horizon_days": HORIZON_BARS,
                 "mu": forecast.mu,
                 "sigma": forecast.sigma,
-                "model_version": ctx.model.model_version,
+                "model_version": forecaster.model_version,
             },
         )
         per_asset[asset] = {"mu": forecast.mu, "sigma": forecast.sigma}
     detail: dict[str, object] = {
-        "model_version": ctx.model.model_version,
+        "model_version": forecaster.model_version,
         "horizon_days": HORIZON_BARS,
         "forecasts": per_asset,
     }
@@ -530,7 +506,13 @@ def _stage_blend(ctx: _RunContext) -> tuple[str, dict[str, object]]:
         [ctx.returns[asset].rename(asset) for asset in UNIVERSE], axis=1, join="inner"
     ).sort_index()
     sigma_annual = ledoit_wolf_sigma(returns_frame)
-    bl = bl_blend(sigma_annual, ctx.forecasts)
+    # The resolved view source produces {asset: Forecast} views; bl_blend
+    # consumes them identically regardless of origin. For the `forecast` source
+    # (the V1 central) this is the model's forecasts unchanged (parity).
+    views = ctx.stack.view_source.provide(
+        registry.ViewContext(forecasts=ctx.forecasts, returns=ctx.returns)
+    )
+    bl = bl_blend(sigma_annual, views)
     ctx.bl = bl
     diag = bl.diagnostics
     for asset in UNIVERSE:
@@ -587,7 +569,7 @@ def _stage_optimize(ctx: _RunContext) -> tuple[str, dict[str, object]]:
     if bl is None:  # pragma: no cover — stages run in order by construction
         raise RuntimeError("optimize stage reached without a blend result")
     w_prev = load_last_weights(ctx.conn)
-    result = optimize_weights(bl.mu_post, bl.sigma_post, w_prev)
+    result = ctx.stack.optimizer.optimize(bl.mu_post, bl.sigma_post, w_prev)
     for asset in UNIVERSE:
         storage.insert_row(
             ctx.conn,
@@ -642,6 +624,7 @@ _STAGE_FNS: Final[dict[str, _StageFn]] = {
 def run_pipeline(
     conn: sqlite3.Connection,
     *,
+    config: config_module.Config | None = None,
     trigger: str = "manual",
     force: bool = False,
     model: WorldModel | None = None,
@@ -657,13 +640,21 @@ def run_pipeline(
         mode; must be file-backed). This function owns the per-run
         ``BEGIN IMMEDIATE`` transaction — see the module docstring's two-phase
         design.
+    config:
+        The :class:`~abe.config.Config` to run (resolved into the concrete stage
+        stack via :mod:`abe.registry`; the run is tagged with its ``config_id``).
+        ``None`` re-reads the db's central Config each run (so a ``set_central``
+        takes effect on the very next tick — the always-on loop runs central).
     trigger:
         Who started the run: one of :data:`TRIGGERS` (stored in ``runs``).
     force:
         Bypass the freshness gate (stage 0) and recompute unconditionally.
     model:
-        The forecaster; ``None`` builds the default :class:`EWMABaseline`.
-        Structurally asserted against the ``WorldModel`` protocol.
+        Back-compat forecaster OVERRIDE (the seam tests inject through and the
+        ``ABE_MODEL`` env toggle sets). When given, it replaces the resolved
+        Config's forecaster (structurally asserted against ``WorldModel``);
+        ``None`` uses the Config's own forecaster. The other three stages always
+        come from the resolved Config.
     macro_status:
         The startup macro probe result (Step 11's scheduler probes ONCE at
         startup and passes it in; the API lifespan does the same). ``None``
@@ -688,23 +679,43 @@ def run_pipeline(
     """
     if trigger not in TRIGGERS:
         raise ValueError(f"trigger must be one of {TRIGGERS}, got {trigger!r}")
-    resolved_model: WorldModel = model if model is not None else EWMABaseline()
-    if not isinstance(resolved_model, WorldModel):
+
+    # Resolve the Config (explicit, else the db's central) + its ViewScenario
+    # into the concrete stage stack. Reading central per-run (not freezing it at
+    # startup) means set_central takes effect on the next tick without a restart.
+    resolved_config = config if config is not None else config_module.get_central_config(conn)
+    view_scenario = config_module.get_view_scenario(conn, resolved_config.view_scenario_id)
+    if view_scenario is None:
+        raise ValueError(
+            f"config {resolved_config.config_id!r} references missing "
+            f"view_scenario {resolved_config.view_scenario_id!r}"
+        )
+    if model is not None and not isinstance(model, WorldModel):
         raise TypeError(
-            f"model {type(resolved_model).__qualname__} does not satisfy the "
+            f"model {type(model).__qualname__} does not satisfy the "
             "WorldModel protocol (model_version + forecast)"
         )
+    # A model override supersedes the config's forecaster: resolve() then skips
+    # building it entirely (so a broken central forecaster can't break an
+    # override run, and no checkpoint is loaded only to be discarded).
+    stack = registry.resolve(resolved_config, view_scenario, forecaster_override=model)
+
     resolved_status = (
         macro_status if macro_status is not None else probe_fred_key(load_fred_api_key())
     )
     db_path = _database_file(conn)
 
     # Phase 0 (autocommit): open the run ledger row before the transaction so
-    # the AUTOINCREMENT run_id survives any rollback.
+    # the AUTOINCREMENT run_id survives any rollback; tag it with config_id.
     run_id_raw = storage.insert_row(
         conn,
         "runs",
-        {"started_at_utc": utc_now_iso(), "status": "running", "trigger": trigger},
+        {
+            "started_at_utc": utc_now_iso(),
+            "status": "running",
+            "trigger": trigger,
+            "config_id": resolved_config.config_id,
+        },
     )
     if run_id_raw is None:  # pragma: no cover — INSERT always yields a rowid
         raise RuntimeError("runs insert returned no run_id")
@@ -719,7 +730,7 @@ def run_pipeline(
         run_id=run_id,
         db_path=db_path,
         force=force,
-        model=resolved_model,
+        stack=stack,
         macro_status=resolved_status,
     )
     records: list[_StageRecord] = []

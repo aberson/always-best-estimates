@@ -204,6 +204,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** refactored `pipeline.py`, `scheduler.py`, `api.py` startup wiring.
 - **Done when:** a **parity golden test** asserts the central Config produces byte-identical `run_stages` detail to the pre-refactor pipeline on a seeded db; `uv run pytest`, `uv run mypy backend`, `uv run ruff check .` green.
 - **Depends on:** 18
+- **Status:** DONE (2026-07-08)
 
 ### Step 20: Config pipeline smoke gate
 - **Problem:** End-to-end smoke: run the real `run_pipeline` with the seeded central Config against the real `data/abe.db` and assert one full cycle completes with all six stages `ok` and a `config_id`-tagged run row — the producer→consumer gate before any observation work.

@@ -144,6 +144,24 @@ def test_resolve_unknown_keys_fail_loud(writer: sqlite3.Connection) -> None:
         registry.resolve(central, replace(scenario, kind="nope"))
 
 
+def test_forecaster_override_supersedes_broken_config_forecaster(
+    writer: sqlite3.Connection,
+) -> None:
+    """A model override must NOT resolve the config's forecaster — so a broken
+    central forecaster can't break an override run (the ABE_MODEL rescue path)."""
+    central = config.get_central_config(writer)
+    scenario = config.get_view_scenario(writer, central.view_scenario_id)
+    assert scenario is not None
+    from dataclasses import replace
+
+    broken = replace(central, forecaster="does-not-exist")
+    override = EWMABaseline()
+    # Without an override this would raise; with one, the config forecaster is skipped.
+    stack = registry.resolve(broken, scenario, forecaster_override=override)
+    assert stack.forecaster is override
+    assert stack.feature_builder.key == "basic"  # other stages still resolved
+
+
 # --------------------------------------------------------------------------- #
 # Param-schema manifest (for the UI dropdowns)
 # --------------------------------------------------------------------------- #

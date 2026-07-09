@@ -1,0 +1,162 @@
+{
+  "blend": {
+    "detail": {
+      "confidences": {
+        "ACWI": 0.5217836116887912,
+        "AGG": 0.26420008208714424,
+        "SPY": 0.46200701977842007
+      },
+      "covariance_window": {
+        "bars": 69,
+        "end": "2026-04-09",
+        "start": "2026-01-05"
+      },
+      "posterior_mu": {
+        "ACWI": -0.13517908302253184,
+        "AGG": 0.01628969842808235,
+        "SPY": -0.12986061247309325
+      },
+      "posterior_sigma": {
+        "ACWI": 0.15681238398853126,
+        "AGG": 0.0616647605101888,
+        "SPY": 0.1382243754627312
+      },
+      "prior": {
+        "ACWI": 0.01950252677310725,
+        "AGG": 0.004000532423273196,
+        "SPY": 0.016600440777860128
+      },
+      "tilt": {
+        "ACWI": -0.1546816097956391,
+        "AGG": 0.012289166004809154,
+        "SPY": -0.14646105325095338
+      },
+      "view": {
+        "ACWI": -0.2590138828283745,
+        "AGG": 0.061221344354935446,
+        "SPY": -0.28838586249867815
+      }
+    },
+    "status": "ok"
+  },
+  "features": {
+    "detail": {
+      "features": [
+        "log_return",
+        "realized_vol"
+      ],
+      "latest": {
+        "ACWI": {
+          "date": "2026-04-09",
+          "log_return": -0.002613078993895508,
+          "realized_vol": 0.18655618969980908
+        },
+        "AGG": {
+          "date": "2026-04-09",
+          "log_return": -0.0033355307215679722,
+          "realized_vol": 0.044113098701801766
+        },
+        "SPY": {
+          "date": "2026-04-09",
+          "log_return": -0.012735277924842513,
+          "realized_vol": 0.14186852853868342
+        }
+      },
+      "windows": {
+        "log_return": "1 day",
+        "realized_vol": "21 days, annualized"
+      }
+    },
+    "status": "ok"
+  },
+  "forecast": {
+    "detail": {
+      "forecasts": {
+        "ACWI": {
+          "mu": -0.021584490235697876,
+          "sigma": 0.030436091094374722
+        },
+        "AGG": {
+          "mu": 0.0051017786962446205,
+          "sigma": 0.015119942007118433
+        },
+        "SPY": {
+          "mu": -0.02403215520822318,
+          "sigma": 0.039022689065715106
+        }
+      },
+      "horizon_days": 21,
+      "model_version": "ewma"
+    },
+    "status": "ok"
+  },
+  "freshness": {
+    "detail": {
+      "data_fetched_at": "2026-07-07T00:00:00Z",
+      "data_max_date": "2026-04-09",
+      "force": true,
+      "last_ok_data_fetched_at": null,
+      "last_ok_data_max_date": null,
+      "last_ok_run_id": null
+    },
+    "status": "ok"
+  },
+  "ingest": {
+    "detail": {
+      "macro": {
+        "code": "MACRO_DISABLED_NO_KEY",
+        "enabled": false,
+        "message": "offline (no key)"
+      },
+      "price_provider": "Yahoo Finance (yfinance)",
+      "prices": {
+        "ACWI": {
+          "first_date": "2026-01-02",
+          "last_date": "2026-04-09",
+          "rows": 70
+        },
+        "AGG": {
+          "first_date": "2026-01-02",
+          "last_date": "2026-04-09",
+          "rows": 70
+        },
+        "SPY": {
+          "first_date": "2026-01-02",
+          "last_date": "2026-04-09",
+          "rows": 70
+        }
+      },
+      "source": "cache"
+    },
+    "status": "ok"
+  },
+  "optimize": {
+    "detail": {
+      "cold_start": true,
+      "objective": {
+        "constraints": [
+          "sum(w) = 1",
+          "0 <= w <= w_max"
+        ],
+        "delta": 2.5,
+        "form": "maximize w^T mu - (delta/2) w^T Sigma w - gamma*||w - w_prev||_1",
+        "gamma_tc": 0.002,
+        "w_max": 0.6
+      },
+      "prev_weights": null,
+      "relaxed_turnover": false,
+      "solver_status": "optimal",
+      "turnover": {
+        "ACWI": 0.0,
+        "AGG": 0.0,
+        "SPY": 0.0
+      },
+      "weights": {
+        "ACWI": 0.13497866537766512,
+        "AGG": 0.5999999994559733,
+        "SPY": 0.26502133516636167
+      }
+    },
+    "status": "ok"
+  }
+}

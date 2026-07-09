@@ -220,14 +220,14 @@ FORECASTERS: Final[dict[str, RegistryEntry[WorldModel]]] = {
 
 @dataclass(frozen=True, slots=True)
 class ViewContext:
-    """What a view source needs to produce its views. ``forecasts`` are the run's
-    model forecasts (used by ``forecast``); ``returns`` are per-asset log-return
-    Series (used by ``historical``, Step 22); ``payload`` is the ViewScenario
-    payload (used by ``historical`` + ``counterfactual``, Step 22)."""
+    """The per-run data a view source needs. ``forecasts`` are the run's model
+    forecasts (used by ``forecast``); ``returns`` are per-asset log-return Series
+    (used by ``historical``, Step 22). The ViewScenario payload is NOT here — a
+    source captures its own payload at construction (the factory takes it), the
+    same way the forecaster/optimizer capture their params."""
 
     forecasts: dict[str, Forecast]
     returns: dict[str, pd.Series] = field(default_factory=dict)
-    payload: dict[str, object] = field(default_factory=dict)
 
 
 class ViewSource(Protocol):
@@ -341,20 +341,36 @@ def _stage_params(config: Config, stage: str) -> Mapping[str, object]:
     return raw if isinstance(raw, Mapping) else {}
 
 
-def resolve(config: Config, view_scenario: ViewScenario) -> ResolvedStack:
+def resolve(
+    config: Config,
+    view_scenario: ViewScenario,
+    *,
+    forecaster_override: WorldModel | None = None,
+) -> ResolvedStack:
     """Turn a Config + its ViewScenario into concrete stage impls.
 
     Per-stage params come from ``config.params[<stage>]`` (``features`` /
     ``forecaster`` / ``optimizer``); the view source is keyed by the scenario's
     ``kind`` and parameterized by its ``payload``. An unknown key at any stage
-    raises ``ValueError`` (the loud resolve-time validation)."""
+    raises ``ValueError`` (the loud resolve-time validation).
+
+    ``forecaster_override`` (the back-compat ``ABE_MODEL`` / test seam) SUPERSEDES
+    the config's forecaster: when given, the config's ``forecaster`` key is NOT
+    resolved at all — so a broken central forecaster (e.g. a missing JEPA
+    checkpoint) does not break a run the override would otherwise rescue, and no
+    checkpoint is loaded only to be discarded."""
+    forecaster = (
+        forecaster_override
+        if forecaster_override is not None
+        else _resolve_one(
+            FORECASTERS, config.forecaster, "forecaster", _stage_params(config, "forecaster")
+        )
+    )
     return ResolvedStack(
         feature_builder=_resolve_one(
             FEATURE_BUILDERS, config.feature_set, "feature_set", _stage_params(config, "features")
         ),
-        forecaster=_resolve_one(
-            FORECASTERS, config.forecaster, "forecaster", _stage_params(config, "forecaster")
-        ),
+        forecaster=forecaster,
         view_source=_resolve_one(
             VIEW_SOURCES, view_scenario.kind, "view kind", view_scenario.payload
         ),
