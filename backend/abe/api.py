@@ -94,7 +94,8 @@ from abe.calc import EXPLANATIONS
 from abe.ingest.macro import load_fred_api_key, probe_fred_key
 from abe.model import load_model
 from abe.model.base import WorldModel
-from abe.scheduler import Scheduler, SchedulerConfig
+from abe.pipeline import latest_ok_central_run_id
+from abe.scheduler import CentralConfigRunError, Scheduler, SchedulerConfig
 
 __all__ = [
     "ABE_JEPA_CHECKPOINT_ENV",
@@ -306,9 +307,12 @@ def create_app(
 
     @app.get("/api/runs/latest")
     def runs_latest() -> dict[str, Any]:
-        """The latest ok run + its stages (the UI poll target)."""
+        """The latest ok CENTRAL run + its stages (the UI poll target).
+
+        Scoped to the central config so an on-demand non-central run never
+        hijacks the displayed "portfolio you'd buy" (Track 2 Step 21)."""
         with _read_conn(resolved_path) as conn:
-            run_id = storage.latest_ok_run_id(conn)
+            run_id = latest_ok_central_run_id(conn)
             if run_id is None:
                 raise HTTPException(status_code=404, detail="no successful run yet")
             run = _run_dict(conn, run_id)
@@ -357,6 +361,29 @@ def create_app(
         scheduler: Scheduler = request.app.state.scheduler
         pending = await scheduler.request_run(force=payload.force)
         return {"run_id": pending.run_id, "already_running": pending.already_running}
+
+    @app.post("/api/configs/{config_id}/run")
+    async def run_config(
+        config_id: int, request: Request, body: TriggerRequest | None = None
+    ) -> dict[str, Any]:
+        """Compute a run for a Config on demand (Track 2 Step 21).
+
+        Dispatched through the scheduler's single executor (one-writer / FIFO
+        preserved). ``force=false`` (default) serves a cached run when the data
+        is unchanged since this config's last ok run; otherwise a fresh run is
+        computed and tagged with ``config_id``. Blocks until the run completes.
+        Returns ``{run_id, config_id, cached}``; 404 on an unknown config.
+        """
+        payload = body if body is not None else TriggerRequest()
+        scheduler: Scheduler = request.app.state.scheduler
+        try:
+            result = await scheduler.request_config_run(config_id, force=payload.force)
+        except CentralConfigRunError as exc:
+            # central belongs to the always-on loop, not the on-demand path
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"run_id": result.run_id, "config_id": result.config_id, "cached": result.cached}
 
     # Production static serving (module docstring): mounted LAST so every API
     # route above matches first; conditional so dev/tests without a build

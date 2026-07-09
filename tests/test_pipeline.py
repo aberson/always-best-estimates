@@ -476,8 +476,13 @@ def test_w_prev_round_trip(writer: sqlite3.Connection) -> None:
         assert prev_weight == first_weights[str(asset)]
         assert float(turnover) == pytest.approx(abs(float(weight) - float(prev_weight)), abs=1e-15)
 
-    # load_last_weights now reads run 2 (the new latest ok run).
-    assert load_last_weights(writer) == {str(row[0]): float(row[1]) for row in second_rows}
+    # load_last_weights now reads run 2 (the central config's new latest ok run).
+    from abe import config as config_module
+
+    central_id = config_module.get_central_config(writer).config_id
+    assert load_last_weights(writer, central_id) == {
+        str(row[0]): float(row[1]) for row in second_rows
+    }
 
 
 # --------------------------------------------------------------------------- #

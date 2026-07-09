@@ -151,6 +151,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final, Protocol
 
+from abe import config as config_module
 from abe import storage
 from abe.ingest.macro import (
     FredApiClient,
@@ -162,17 +163,26 @@ from abe.ingest.macro import (
 from abe.ingest.prices import ingest_prices
 from abe.ingest.sources import SourceAdapter, YFinanceAdapter, utc_now_iso
 from abe.model.base import WorldModel
-from abe.pipeline import run_pipeline, stored_data_fetched_at
+from abe.pipeline import cached_config_run, run_pipeline, stored_data_fetched_at
 
 __all__ = [
     "DAILY_FETCH_HOUR_UTC",
     "RECOMPUTE_INTERVAL_S",
     "SWEEP_ERROR_TEXT",
+    "CentralConfigRunError",
+    "ConfigRun",
     "PendingRun",
     "PipelineFn",
     "Scheduler",
     "SchedulerConfig",
 ]
+
+
+class CentralConfigRunError(ValueError):
+    """The on-demand path was asked to run the CENTRAL config. The central config
+    is the portfolio you'd buy — the always-on loop owns it (use ``request_run``
+    / ``POST /api/runs/trigger``); running it on the on-demand path would bypass
+    the loop's model override and land a redundant central run."""
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +230,20 @@ class PendingRun:
 
     run_id: int
     already_running: bool
+
+
+@dataclass(frozen=True)
+class ConfigRun:
+    """What :meth:`Scheduler.request_config_run` resolves to (Step 21).
+
+    ``cached=True`` means the current data matched the config's last ok run's
+    watermarks, so that cached ``run_id`` is returned WITHOUT a recompute;
+    ``cached=False`` means a fresh run was computed and tagged with ``config_id``.
+    """
+
+    run_id: int
+    config_id: int
+    cached: bool
 
 
 def _utc_now() -> datetime:
@@ -407,6 +431,63 @@ class Scheduler:
         self._wake_event.set()
         run_id = await asyncio.shield(started)
         return PendingRun(run_id=run_id, already_running=False)
+
+    async def request_config_run(self, config_id: int, *, force: bool = False) -> ConfigRun:
+        """Compute a run for a NON-central Config on demand (Step 21).
+
+        Dispatched through the SAME single-worker executor as the always-on loop
+        (FIFO), so it serializes behind / ahead of the central recompute — the
+        one-writer, single-flight discipline is preserved by construction (no new
+        connection, no second writer thread). ``force=False`` first consults the
+        per-config cache (:func:`abe.pipeline.cached_config_run`): unchanged data
+        since this config's last ok run returns that run WITHOUT recomputing.
+        Otherwise a fresh run is computed and tagged with ``config_id``.
+
+        Raises ``ValueError`` (unknown config) or ``RuntimeError`` (scheduler not
+        running). Blocks until the run completes (or the cache hit resolves) —
+        an on-demand comparison is a deliberate, awaited action.
+        """
+        task = self._task
+        if task is None or task.done():
+            raise RuntimeError("scheduler is not running (start() not called, or stopped)")
+        executor = self._require_executor()
+        loop = self._require_loop()
+
+        def _config_job() -> ConfigRun:
+            conn = self._require_conn()
+            cfg = config_module.get_config(conn, config_id)
+            if cfg is None:
+                raise ValueError(f"no config with id {config_id}")
+            if cfg.is_central:
+                # Central belongs to the loop (which applies the model override);
+                # running it here would bypass that and land a redundant run.
+                raise CentralConfigRunError(
+                    f"config {config_id} is central; trigger it via the always-on loop "
+                    "(POST /api/runs/trigger), not the on-demand config-run path"
+                )
+            if not force:
+                cached = cached_config_run(conn, config_id)
+                if cached is not None:
+                    return ConfigRun(run_id=cached, config_id=config_id, cached=True)
+            # force=True bypasses the pipeline's GLOBAL freshness gate (which is
+            # central-oriented); the per-config cache check above is the gate for
+            # on-demand runs.
+            run_id = run_pipeline(
+                conn, config=cfg, trigger="manual", force=True, macro_status=self._macro_status
+            )
+            busy, log_frames, checkpointed = storage.wal_checkpoint_truncate(conn)
+            if busy:
+                logger.warning(
+                    "wal_checkpoint(TRUNCATE) after config run %d was blocked (busy=%d): "
+                    "%d of %d WAL frames checkpointed",
+                    run_id,
+                    busy,
+                    checkpointed,
+                    log_frames,
+                )
+            return ConfigRun(run_id=int(run_id), config_id=config_id, cached=False)
+
+        return await asyncio.shield(loop.run_in_executor(executor, _config_job))
 
     # ------------------------------------------------------------------ #
     # Executor-thread bodies

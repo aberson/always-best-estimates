@@ -226,6 +226,8 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `POST /api/configs/{id}/run` (or equivalent) + scheduler dispatch; cache/read helpers.
 - **Done when:** a test triggers a non-central config run, reads it back tagged by `config_id`, and a second same-data request is served from cache; single-writer invariant asserted; `uv run pytest` green.
 - **Depends on:** 19
+- **Status:** DONE (2026-07-08)
+- **Note (for Step 25):** on-demand runs reject the central config id (409 — central runs via the loop). The per-config cache (`cached_config_run`) is keyed on data watermarks only, NOT the recipe — Step 25's `update_config` API MUST invalidate the cache on a recipe edit (documented on `cached_config_run`).
 
 ### Step 22: View scenarios — historical + counterfactual providers + library
 - **Problem:** Make the blend's view source pluggable behind `backend/abe/blend/views.py`: `forecast` (current), `historical` (absolute views from a chosen past window's realized returns), `counterfactual` (hand-authored absolute views + confidences, e.g. SPY +10%). Add a pre-programmed library + CRUD for on-the-fly scenarios. `bl_blend` consumes the provider's `{asset: view}` + confidences.

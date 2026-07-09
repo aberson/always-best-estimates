@@ -141,8 +141,11 @@ from abe.optimize.mvu import GAMMA_TC
 __all__ = [
     "STAGES",
     "TRIGGERS",
+    "cached_config_run",
     "last_ok_data_fetched_at",
     "last_ok_data_max_date",
+    "latest_ok_central_run_id",
+    "latest_ok_run_id_for_config",
     "load_last_weights",
     "run_pipeline",
     "should_skip_run",
@@ -259,13 +262,67 @@ def should_skip_run(
     return True
 
 
-def load_last_weights(conn: sqlite3.Connection) -> dict[str, float] | None:
-    """The last persisted allocation: ``target_weights`` of the latest ok run.
+def latest_ok_run_id_for_config(conn: sqlite3.Connection, config_id: int) -> int | None:
+    """``MAX(run_id) WHERE status='ok' AND config_id=?`` — the latest cached run
+    for one Config (the per-config analogue of ``storage.latest_ok_run_id``)."""
+    row = conn.execute(
+        "SELECT MAX(run_id) FROM runs WHERE status = 'ok' AND config_id = ?", (config_id,)
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    return int(row[0])
 
-    ``None`` when no ok run exists (or, defensively, when an ok run has no
+
+def latest_ok_central_run_id(conn: sqlite3.Connection) -> int | None:
+    """The CENTRAL config's latest ok run — the UI's central-answer poll target.
+
+    Scoped to the central config so an on-demand non-central run (which lands a
+    higher ``run_id``) can NEVER hijack ``/api/runs/latest`` (Step 21; the plan's
+    "the central answer stays unambiguous" invariant)."""
+    central = config_module.get_central_config(conn)
+    return latest_ok_run_id_for_config(conn, central.config_id)
+
+
+def cached_config_run(conn: sqlite3.Connection, config_id: int) -> int | None:
+    """The on-demand cache gate (Step 21): the cached ok run_id for ``config_id``
+    IFF the current stored data matches the watermarks that run recorded, else
+    ``None`` (recompute needed).
+
+    Reuses the freshness watermarks (``data_max_date`` + ``data_fetched_at``)
+    keyed to THIS config's latest ok run — so a second on-demand request on
+    unchanged data is served from cache, while new/revised prices force a
+    recompute. Mirrors :func:`should_skip_run`'s two-watermark rule, per-config.
+
+    LIMITATION (Step 25 closes it): keyed on data watermarks only, NOT the
+    config's recipe — an in-place ``update_config`` that changes the recipe on
+    unchanged data would return the pre-edit run. Safe today (no config-edit API
+    until Step 25); Step 25 must invalidate this cache on ``update_config``."""
+    last = latest_ok_run_id_for_config(conn, config_id)
+    if last is None:
+        return None
+    current_date = stored_data_max_date(conn)
+    current_fetched = stored_data_fetched_at(conn)
+    cached_date = last_ok_data_max_date(conn, last)
+    cached_fetched = last_ok_data_fetched_at(conn, last)
+    if (
+        current_date is not None
+        and current_date == cached_date
+        and current_fetched is not None
+        and current_fetched == cached_fetched
+    ):
+        return last
+    return None
+
+
+def load_last_weights(conn: sqlite3.Connection, config_id: int) -> dict[str, float] | None:
+    """The last persisted allocation FOR THIS CONFIG: ``target_weights`` of the
+    config's latest ok run (the turnover baseline).
+
+    ``None`` when this config has no ok run yet (or, defensively, when it has no
     weight rows) — the optimizer's cold start, which DROPS the turnover term.
-    """
-    last_ok = storage.latest_ok_run_id(conn)
+    Scoped by ``config_id`` so an on-demand alt run never shifts the central
+    config's turnover baseline (Step 21)."""
+    last_ok = latest_ok_run_id_for_config(conn, config_id)
     if last_ok is None:
         return None
     rows = conn.execute(
@@ -308,6 +365,7 @@ class _RunContext:
 
     conn: sqlite3.Connection
     run_id: int
+    config_id: int
     db_path: Path
     force: bool
     stack: registry.ResolvedStack
@@ -414,7 +472,10 @@ def _record_failure(
 def _stage_freshness(ctx: _RunContext) -> tuple[str, dict[str, object]]:
     current_date = stored_data_max_date(ctx.conn)
     current_fetched = stored_data_fetched_at(ctx.conn)
-    last_ok = storage.latest_ok_run_id(ctx.conn)
+    # Per-config freshness: compare against THIS config's own last ok run so an
+    # interleaved on-demand run of a DIFFERENT config never makes the central
+    # loop skip its recompute (Step 21).
+    last_ok = latest_ok_run_id_for_config(ctx.conn, ctx.config_id)
     last_date = last_ok_data_max_date(ctx.conn, last_ok)
     last_fetched = last_ok_data_fetched_at(ctx.conn, last_ok)
     ctx.skip = should_skip_run(
@@ -568,7 +629,7 @@ def _stage_optimize(ctx: _RunContext) -> tuple[str, dict[str, object]]:
     bl = ctx.bl
     if bl is None:  # pragma: no cover — stages run in order by construction
         raise RuntimeError("optimize stage reached without a blend result")
-    w_prev = load_last_weights(ctx.conn)
+    w_prev = load_last_weights(ctx.conn, ctx.config_id)
     result = ctx.stack.optimizer.optimize(bl.mu_post, bl.sigma_post, w_prev)
     for asset in UNIVERSE:
         storage.insert_row(
@@ -728,6 +789,7 @@ def run_pipeline(
     ctx = _RunContext(
         conn=conn,
         run_id=run_id,
+        config_id=resolved_config.config_id,
         db_path=db_path,
         force=force,
         stack=stack,
