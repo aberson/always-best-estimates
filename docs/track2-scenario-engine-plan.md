@@ -214,6 +214,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** a `-m smoke`-marked end-to-end test (extends `scripts/smoke.py` / the smoke suite).
 - **Done when:** `uv run pytest -m smoke` green on the real db (never skips vacuously).
 - **Depends on:** 19
+- **Status:** DONE (2026-07-08)
 
 ### Sub-phase 2B — Pluggable stages + new implementations
 

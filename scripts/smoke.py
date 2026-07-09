@@ -202,6 +202,7 @@ class SmokeReport:
     weights: dict[str, float]
     weights_sum: float
     ingest_source: str
+    config_id: int
     elapsed_s: float
 
 
@@ -358,6 +359,29 @@ def _verify_run(
     return cards, ingest_detail
 
 
+def _verify_config_tagged(conn: sqlite3.Connection, run_id: int) -> int:
+    """The Track 2 Step 20 gate: the run is tagged with the CENTRAL config_id.
+
+    The always-on loop runs exactly the central Config (plan §6), so a smoke
+    run's ``runs.config_id`` must be non-NULL and reference the single
+    ``is_central`` config — proving the Config-driven pipeline (Step 19) is the
+    live path, not a NULL-tagged legacy run."""
+    row = conn.execute("SELECT config_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+    config_id = None if row is None else row[0]
+    _require(
+        config_id is not None,
+        f"run {run_id}: runs.config_id is NULL — the run was not Config-tagged "
+        "(Track 2 Step 19 tags every run with its Config)",
+    )
+    central = conn.execute("SELECT config_id FROM configs WHERE is_central = 1").fetchone()
+    _require(
+        central is not None and int(config_id) == int(central[0]),
+        f"run {run_id}: config_id {config_id!r} is not the central config "
+        f"{None if central is None else central[0]!r} (the loop must run central)",
+    )
+    return int(config_id)
+
+
 def _verify_weights(conn: sqlite3.Connection, run_id: int) -> tuple[dict[str, float], float]:
     """Assert ``target_weights`` covers the UNIVERSE and sums to 1."""
     rows = conn.execute(
@@ -497,6 +521,7 @@ def _run_cycle(path: Path, start: float) -> SmokeReport:
         try:
             cards, ingest_detail = _verify_run(conn, run_id)
             weights, weights_sum = _verify_weights(conn, run_id)
+            config_id = _verify_config_tagged(conn, run_id)
         finally:
             conn.close()
 
@@ -524,6 +549,7 @@ def _run_cycle(path: Path, start: float) -> SmokeReport:
         weights=weights,
         weights_sum=weights_sum,
         ingest_source=str(ingest_detail.get("source")),
+        config_id=config_id,
         elapsed_s=monotonic() - start,
     )
 

@@ -71,6 +71,7 @@ def _assert_passing_report(report: SmokeReport, db_path: Path) -> None:
     assert set(report.weights) == set(UNIVERSE)
     assert math.isclose(report.weights_sum, 1.0, abs_tol=1e-9)
     assert report.ingest_source == "cache"
+    assert report.config_id >= 1  # Track 2: the run is Config-tagged (central)
     assert 0.0 <= report.elapsed_s <= 120.0
 
 
@@ -95,6 +96,34 @@ def test_smoke_real_db() -> None:
             f"ABE_REAL_DB): {exc}"
         )
     _assert_passing_report(report, REAL_DB)
+
+
+@pytest.mark.smoke
+def test_smoke_real_db_config_tagged() -> None:
+    """Track 2 Step 20 gate: one REAL central-Config cycle end-to-end on the real
+    db lands all six stages ok AND tags the run with the central config_id.
+
+    Independently cross-checks the report's config_id against the db's central
+    config (the smoke core already asserts central-match; this names the gate and
+    proves the id really is the ``is_central`` row on the real db)."""
+    from abe import config as config_module
+
+    try:
+        report = run_smoke(REAL_DB)
+    except SmokePreconditionError as exc:
+        pytest.fail(
+            f"Step 20 smoke gate cannot pass vacuously - real db precondition missing at "
+            f"{REAL_DB}: {exc}"
+        )
+    _assert_passing_report(report, REAL_DB)
+    conn = storage.open_read_only(REAL_DB)
+    try:
+        central = config_module.get_central_config(conn)
+    finally:
+        conn.close()
+    assert report.config_id == central.config_id
+    assert [card.stage for card in report.cards] == list(STAGES)
+    assert all(card.status == "ok" for card in report.cards)
 
 
 # --------------------------------------------------------------------------- #
