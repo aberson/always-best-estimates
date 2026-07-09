@@ -442,3 +442,374 @@ button:disabled {
   font-size: 0.8rem;
   font-style: italic;
 }
+
+/* ============================================================ Track 2 UI */
+
+/* ---------------------------------------------------------------- nav bar */
+
+.app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.75rem 0 1.25rem;
+  border-bottom: 1px solid var(--panel-edge);
+  padding-bottom: 0.6rem;
+}
+
+.nav-link {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 0.92rem;
+  font-weight: 550;
+  padding: 0.35rem 0.85rem;
+  border-radius: 8px;
+}
+
+.nav-link:hover {
+  color: var(--text);
+  background: var(--panel);
+}
+
+.nav-link-active {
+  color: #10141a;
+  background: var(--accent);
+}
+
+.nav-link-active:hover {
+  color: #10141a;
+  background: var(--accent);
+  filter: brightness(1.08);
+}
+
+/* ------------------------------------------------------------- view shell */
+
+.view {
+  margin-top: 0.5rem;
+}
+
+.view-head {
+  margin-bottom: 1rem;
+}
+
+.view-head h2 {
+  margin: 0 0 0.25rem;
+  font-size: 1.15rem;
+  font-weight: 650;
+}
+
+.view-head p {
+  margin: 0;
+  font-size: 0.88rem;
+}
+
+/* --------------------------------------------------------- forms / fields */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+}
+
+.field > span {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+input,
+select {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--panel-edge);
+  border-radius: 8px;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.92rem;
+  font-family: inherit;
+}
+
+input[type="checkbox"] {
+  width: auto;
+  accent-color: var(--accent);
+}
+
+input:focus,
+select:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+input:disabled {
+  opacity: 0.5;
+}
+
+.form-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  margin-top: 1rem;
+}
+
+.btn-secondary {
+  background: var(--panel-edge);
+  color: var(--text);
+}
+
+.btn-danger {
+  background: var(--red-bg);
+  color: var(--red);
+}
+
+.btn-small {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.82rem;
+}
+
+.form-msg {
+  margin: 0.9rem 0;
+  padding: 0.55rem 0.9rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.form-msg-ok {
+  background: var(--green-bg);
+  border: 1px solid var(--green);
+  color: #a9e0bd;
+}
+
+.form-msg-error {
+  background: var(--red-bg);
+  border: 1px solid var(--red);
+  color: #f1b6b2;
+}
+
+/* ---------------------------------------------------- config / stage tab */
+
+.config-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 1rem;
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.config-picker .field {
+  margin: 0;
+  min-width: 220px;
+}
+
+.picker-label {
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  align-self: center;
+}
+
+.checkbox-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.checkbox {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9rem;
+}
+
+.stage-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.stage-section {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem 1rem;
+}
+
+.stage-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.stage-note {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+}
+
+.stage-desc {
+  margin: 0.5rem 0 0;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.param-form {
+  margin-top: 0.6rem;
+  border-top: 1px solid var(--panel-edge);
+  padding-top: 0.4rem;
+}
+
+.param-type {
+  color: var(--text-dim);
+  font-style: normal;
+  font-size: 0.75rem;
+}
+
+.param-desc {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.param-desc code {
+  font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+  font-size: 0.76rem;
+  color: var(--accent);
+  word-break: break-word;
+}
+
+/* ------------------------------------------------------------ compare view */
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+.compare-table {
+  min-width: 100%;
+}
+
+.compare-table td,
+.compare-table th {
+  padding-right: 1.1rem;
+}
+
+.compare-col-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.central-badge {
+  background: var(--green-bg);
+  color: var(--green);
+  border-radius: 999px;
+  padding: 0.05rem 0.5rem;
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.compare-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
+.compare-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 0.75rem 1rem 0.9rem;
+}
+
+.compare-card-central {
+  border-color: var(--green);
+}
+
+.compare-card-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+}
+
+.compare-run {
+  margin: 0 0 0.5rem;
+  color: var(--text-dim);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.compare-central-note {
+  margin: 0.6rem 0 0;
+  font-size: 0.8rem;
+}
+
+/* --------------------------------------------------------- scenario editor */
+
+.scenario-list {
+  margin-bottom: 1.5rem;
+  overflow-x: auto;
+}
+
+.scenario-summary {
+  color: var(--text-dim);
+  white-space: normal;
+}
+
+.kind-badge {
+  border-radius: 6px;
+  padding: 0.08rem 0.5rem;
+  font-size: 0.76rem;
+  font-weight: 550;
+  background: var(--panel-edge);
+  color: var(--text-dim);
+}
+
+.kind-counterfactual {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+
+.kind-historical {
+  background: #17293a;
+  color: var(--accent);
+}
+
+.kind-forecast {
+  background: var(--green-bg);
+  color: var(--green);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
+  align-items: start;
+}
+
+.form-card {
+  background: var(--panel);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  padding: 0.9rem 1.1rem 1rem;
+}
+
+.form-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.cf-table {
+  margin-top: 0.5rem;
+}
+
+.cf-input {
+  width: 6.5rem;
+  padding: 0.25rem 0.45rem;
+}

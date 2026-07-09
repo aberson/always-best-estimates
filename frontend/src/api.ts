@@ -162,3 +162,296 @@ export async function getExplanations(): Promise<Record<string, Explanation>> {
   }
   return ((await response.json()) as ExplainResponse).explanations;
 }
+
+// ==========================================================================
+// Track 2: pluggable-per-stage config / scenario / compare API (Step 25).
+// ==========================================================================
+
+/** The fixed 3-asset universe (mirrors backend `abe.constants.UNIVERSE`). */
+export const UNIVERSE = ["SPY", "ACWI", "AGG"] as const;
+
+/** One tunable parameter of a stage impl (registry `param_schema` entry). */
+export interface RegistryParam {
+  name: string;
+  type: string; // "float" | "int" | "str" | "bool"
+  default: unknown;
+  description: string;
+}
+
+/** One registered stage impl: its human description + declared param schema. */
+export interface RegistryEntry {
+  description: string;
+  params: RegistryParam[];
+}
+
+/** A single registry: impl key -> entry (registries_manifest per-stage value). */
+export type RegistryMap = Record<string, RegistryEntry>;
+
+/** The four stage registries served by `GET /api/registries`. */
+export interface Registries {
+  feature_set: RegistryMap;
+  forecaster: RegistryMap;
+  view_source: RegistryMap;
+  optimizer: RegistryMap;
+}
+
+/** `GET /api/registries` envelope. */
+export interface RegistriesResponse {
+  registries: Registries;
+}
+
+/** One `configs` row (a named per-stage pipeline recipe; plan §5). */
+export interface Config {
+  config_id: number;
+  name: string;
+  feature_set: string;
+  forecaster: string;
+  view_scenario_id: number;
+  optimizer: string;
+  /** Per-stage param overrides, structurally `{stage: {param: value}}`. */
+  params: Record<string, unknown>;
+  is_central: boolean;
+  created_at_utc: string | null;
+  updated_at_utc: string | null;
+}
+
+/** `GET /api/configs` envelope. */
+export interface ConfigsResponse {
+  configs: Config[];
+}
+
+/** `POST /api/configs` body. */
+export interface ConfigCreate {
+  name: string;
+  feature_set: string;
+  forecaster: string;
+  view_scenario_id: number;
+  optimizer: string;
+  params: Record<string, unknown>;
+}
+
+/** `PATCH /api/configs/{id}` body — any subset of the recipe fields. */
+export type ConfigPatch = Partial<ConfigCreate>;
+
+/** `POST /api/configs/{id}/run` -> `{run_id, config_id, cached}`. */
+export interface ConfigRunResponse {
+  run_id: number;
+  config_id: number;
+  cached: boolean;
+}
+
+/** The valid `view_scenarios.kind` values (backend CHECK constraint). */
+export type ScenarioKind = "forecast" | "historical" | "counterfactual";
+
+/** One `view_scenarios` row (a named Black-Litterman view set; plan §5). */
+export interface Scenario {
+  view_scenario_id: number;
+  name: string;
+  kind: ScenarioKind;
+  /** kind-dependent: forecast -> `{}`; historical -> `{window_start?, window_end?}`;
+   *  counterfactual -> `{asset: {mu, confidence}}`. */
+  payload: Record<string, unknown>;
+  created_at_utc: string | null;
+}
+
+/** `GET /api/scenarios` envelope. */
+export interface ScenariosResponse {
+  scenarios: Scenario[];
+}
+
+/** `POST /api/scenarios` body. */
+export interface ScenarioCreate {
+  name: string;
+  kind: ScenarioKind;
+  payload: Record<string, unknown>;
+}
+
+/** `PATCH /api/scenarios/{id}` body (`kind` is immutable — author anew). */
+export interface ScenarioPatch {
+  name?: string;
+  payload?: Record<string, unknown>;
+}
+
+/** One config's row in `GET /api/compare` (its latest ok run's allocation). */
+export interface CompareConfig {
+  config_id: number;
+  name: string;
+  is_central: boolean;
+  weights: Record<string, number>;
+  objective: Record<string, unknown> | null;
+  run_id: number | null;
+  finished_at_utc: string | null;
+}
+
+/** `GET /api/compare?config_ids=…` — N configs side by side + the central id. */
+export interface CompareResponse {
+  central_config_id: number;
+  configs: CompareConfig[];
+}
+
+/** Build a JSON-body `RequestInit` for POST/PATCH (Content-Type merged by
+ *  `requestJson`, which keeps the Accept header). */
+function jsonBody(method: string, body: unknown): RequestInit {
+  return {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+}
+
+/** Pull FastAPI's `{detail: ...}` message out of a non-OK response, defensively
+ *  (the body may be absent or not JSON). */
+async function detailOf(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as unknown;
+    if (typeof body === "object" && body !== null && "detail" in body) {
+      const detail = (body as Record<string, unknown>)["detail"];
+      if (typeof detail === "string") {
+        return detail;
+      }
+      if (detail !== undefined) {
+        return JSON.stringify(detail);
+      }
+    }
+  } catch {
+    /* body absent or not JSON — fall back to the bare status */
+  }
+  return null;
+}
+
+/** Map a non-OK response to an `ApiError`, surfacing the server's `detail`
+ *  (e.g. the 409 "config is central" / "referenced by N config(s)" reasons). */
+async function apiErrorFrom(response: Response, label: string): Promise<ApiError> {
+  const detail = await detailOf(response);
+  return new ApiError(
+    response.status,
+    detail !== null
+      ? `${label}: ${detail} (HTTP ${response.status})`
+      : `${label} failed: HTTP ${response.status}`,
+  );
+}
+
+/** The four stage registries (keys + param schemas) for the UI dropdowns. */
+export async function getRegistries(): Promise<Registries> {
+  const response = await requestJson("/api/registries");
+  if (!response.ok) {
+    throw await apiErrorFrom(response, "GET /api/registries");
+  }
+  return ((await response.json()) as RegistriesResponse).registries;
+}
+
+/** All configs (recipes), ordered by id. */
+export async function getConfigs(): Promise<Config[]> {
+  const response = await requestJson("/api/configs");
+  if (!response.ok) {
+    throw await apiErrorFrom(response, "GET /api/configs");
+  }
+  return ((await response.json()) as ConfigsResponse).configs;
+}
+
+/** One config by id (404 -> ApiError). */
+export async function getConfig(configId: number): Promise<Config> {
+  const response = await requestJson(`/api/configs/${configId}`);
+  if (!response.ok) {
+    throw await apiErrorFrom(response, `GET /api/configs/${configId}`);
+  }
+  return (await response.json()) as Config;
+}
+
+/** Create a non-central config (201). Name must be unique (409 on conflict). */
+export async function createConfig(body: ConfigCreate): Promise<Config> {
+  const response = await requestJson("/api/configs", jsonBody("POST", body));
+  if (response.status !== 201) {
+    throw await apiErrorFrom(response, "POST /api/configs");
+  }
+  return (await response.json()) as Config;
+}
+
+/** Partial-update a config's recipe fields. */
+export async function updateConfig(configId: number, body: ConfigPatch): Promise<Config> {
+  const response = await requestJson(`/api/configs/${configId}`, jsonBody("PATCH", body));
+  if (!response.ok) {
+    throw await apiErrorFrom(response, `PATCH /api/configs/${configId}`);
+  }
+  return (await response.json()) as Config;
+}
+
+/** Delete a config (204). 409 if it is central or referenced by runs. */
+export async function deleteConfig(configId: number): Promise<void> {
+  const response = await requestJson(`/api/configs/${configId}`, { method: "DELETE" });
+  if (response.status !== 204) {
+    throw await apiErrorFrom(response, `DELETE /api/configs/${configId}`);
+  }
+}
+
+/** Promote a config to central (the deliberate operator action). */
+export async function setConfigCentral(configId: number): Promise<Config> {
+  const response = await requestJson(`/api/configs/${configId}/central`, { method: "POST" });
+  if (!response.ok) {
+    throw await apiErrorFrom(response, `POST /api/configs/${configId}/central`);
+  }
+  return (await response.json()) as Config;
+}
+
+/** Run a config on demand (blocks until done). 409 for the central config. */
+export async function runConfig(configId: number, force = false): Promise<ConfigRunResponse> {
+  const response = await requestJson(
+    `/api/configs/${configId}/run`,
+    jsonBody("POST", { force }),
+  );
+  if (!response.ok) {
+    throw await apiErrorFrom(response, `POST /api/configs/${configId}/run`);
+  }
+  return (await response.json()) as ConfigRunResponse;
+}
+
+/** All view scenarios (seeded library + operator-authored), ordered by id. */
+export async function getScenarios(): Promise<Scenario[]> {
+  const response = await requestJson("/api/scenarios");
+  if (!response.ok) {
+    throw await apiErrorFrom(response, "GET /api/scenarios");
+  }
+  return ((await response.json()) as ScenariosResponse).scenarios;
+}
+
+/** Author a new view scenario (201). 400 on an invalid `kind`. */
+export async function createScenario(body: ScenarioCreate): Promise<Scenario> {
+  const response = await requestJson("/api/scenarios", jsonBody("POST", body));
+  if (response.status !== 201) {
+    throw await apiErrorFrom(response, "POST /api/scenarios");
+  }
+  return (await response.json()) as Scenario;
+}
+
+/** Update a scenario's name and/or payload (`kind` immutable). */
+export async function updateScenario(
+  scenarioId: number,
+  body: ScenarioPatch,
+): Promise<Scenario> {
+  const response = await requestJson(
+    `/api/scenarios/${scenarioId}`,
+    jsonBody("PATCH", body),
+  );
+  if (!response.ok) {
+    throw await apiErrorFrom(response, `PATCH /api/scenarios/${scenarioId}`);
+  }
+  return (await response.json()) as Scenario;
+}
+
+/** Delete a scenario (204). 409 if a config still references it. */
+export async function deleteScenario(scenarioId: number): Promise<void> {
+  const response = await requestJson(`/api/scenarios/${scenarioId}`, { method: "DELETE" });
+  if (response.status !== 204) {
+    throw await apiErrorFrom(response, `DELETE /api/scenarios/${scenarioId}`);
+  }
+}
+
+/** Compare N configs' latest allocations side by side (central id flagged). */
+export async function getCompare(configIds: readonly number[]): Promise<CompareResponse> {
+  const query = configIds.join(",");
+  const response = await requestJson(`/api/compare?config_ids=${encodeURIComponent(query)}`);
+  if (!response.ok) {
+    throw await apiErrorFrom(response, "GET /api/compare");
+  }
+  return (await response.json()) as CompareResponse;
+}

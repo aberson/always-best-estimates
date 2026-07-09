@@ -91,6 +91,7 @@ from pydantic import BaseModel
 
 from abe import config as config_module
 from abe import storage
+from abe.blend.views import seed_library
 from abe.calc import EXPLANATIONS
 from abe.config import Config, ViewScenario
 from abe.ingest.macro import load_fred_api_key, probe_fred_key
@@ -390,6 +391,9 @@ def create_app(
         )
         await scheduler.start()
         app.state.scheduler = scheduler
+        # Seed the pre-programmed view-scenario library (idempotent, matched by
+        # name) through the single writer so the UI can browse/apply it (Step 28).
+        await scheduler.run_write(seed_library)
         try:
             yield
         finally:

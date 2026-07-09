@@ -280,6 +280,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** router wiring, `DashboardView`, `StageDetailTab`, config/scenario API client.
 - **Done when:** runtime reviewers confirm the dashboard still renders the central allocation and each detail tab lists impls + editable params; tsc + vite build clean.
 - **Depends on:** 25
+- **Status:** DONE (2026-07-08)
 
 ### Step 27: Compare view
 - **Problem:** A view that shows N Configs' latest allocations side by side (weights + μ/σ + objective), the **central** Config unmistakably marked, with a control to run/refresh a non-central Config on demand.
@@ -289,6 +290,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `CompareView` + its route.
 - **Done when:** runtime reviewers confirm ≥2 Configs render side by side with the central flagged and an on-demand refresh works; tsc + vite clean.
 - **Depends on:** 26
+- **Status:** DONE (2026-07-08)
 
 ### Step 28: View-scenario authoring UI
 - **Problem:** UI to build/edit view scenarios: author counterfactual absolute views (asset, return, confidence), pick a historical window, and browse/apply the pre-programmed library; attach a scenario to a Config's blend stage.
@@ -298,6 +300,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `ScenarioEditor` + its route.
 - **Done when:** runtime reviewers confirm authoring a "SPY +10%" counterfactual and attaching it changes that Config's blend/optimize output; tsc + vite clean.
 - **Depends on:** 27
+- **Status:** DONE (2026-07-08)
 
 ### Step 29: Soak / observation (always-on + on-demand under load)
 - **Problem:** Run the engine with the central Config on the 5-minute loop for ≥4h while periodically exercising on-demand comparisons and scenario runs. Observe: DB growth + WAL checkpointing, single-writer contention between the loop and on-demand runs, cache correctness (config runs served from cache when data is unchanged), no phantom `running` rows, memory. Capture a findings log.
