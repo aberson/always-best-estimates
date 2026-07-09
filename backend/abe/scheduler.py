@@ -489,6 +489,25 @@ class Scheduler:
 
         return await asyncio.shield(loop.run_in_executor(executor, _config_job))
 
+    async def run_write[T](self, fn: Callable[[sqlite3.Connection], T]) -> T:
+        """Run a write ``fn(conn)`` on THE single writer thread (Step 25).
+
+        Config/scenario CRUD + set-central dispatch through here so the API never
+        opens a SECOND writer connection that would contend with the always-on
+        loop for the WAL write lock — one-writer discipline preserved by
+        construction. Returns ``fn``'s result; ``fn``'s exceptions (IntegrityError,
+        ValueError, ...) propagate to the caller for HTTP mapping."""
+        task = self._task
+        if task is None or task.done():
+            raise RuntimeError("scheduler is not running (start() not called, or stopped)")
+        executor = self._require_executor()
+        loop = self._require_loop()
+
+        def _job() -> T:
+            return fn(self._require_conn())
+
+        return await asyncio.shield(loop.run_in_executor(executor, _job))
+
     # ------------------------------------------------------------------ #
     # Executor-thread bodies
     # ------------------------------------------------------------------ #

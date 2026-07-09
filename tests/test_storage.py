@@ -405,9 +405,9 @@ def _foreign_keys(conn: sqlite3.Connection, table: str) -> set[tuple[object, ...
     }
 
 
-def test_target_version_is_two() -> None:
-    assert storage.SCHEMA_VERSION == 2
-    assert migrations.TARGET_VERSION == 2
+def test_target_version() -> None:
+    assert storage.SCHEMA_VERSION == 3
+    assert migrations.TARGET_VERSION == 3
 
 
 def test_all_tables_match_built_schema(writer: sqlite3.Connection) -> None:
@@ -417,9 +417,14 @@ def test_all_tables_match_built_schema(writer: sqlite3.Connection) -> None:
     assert storage.TABLES == frozenset(storage.ALL_TABLES)
 
 
-def test_fresh_db_opens_at_v2(writer: sqlite3.Connection) -> None:
-    assert writer.execute("PRAGMA user_version").fetchone()[0] == 2
+def test_fresh_db_opens_at_current_version(writer: sqlite3.Connection) -> None:
+    assert writer.execute("PRAGMA user_version").fetchone()[0] == 3
     assert writer.execute("SELECT COUNT(*) FROM configs WHERE is_central = 1").fetchone()[0] == 1
+    # updated_at_utc backfilled to created_at_utc on a fresh migrate (v2->v3)
+    created, updated = writer.execute(
+        "SELECT created_at_utc, updated_at_utc FROM configs WHERE is_central = 1"
+    ).fetchone()
+    assert updated == created
     kinds = {str(row[0]) for row in writer.execute("SELECT kind FROM view_scenarios")}
     assert kinds == {"forecast"}
     name, feature_set, forecaster, optimizer = writer.execute(
@@ -506,10 +511,10 @@ def test_frozen_v1_schema_is_golden(db_path: Path) -> None:
 
 
 def test_fresh_and_migrated_schema_equivalent(tmp_path: Path) -> None:
-    """Path-independence consistency check: a db built fresh at v2 and a db
-    migrated v1 -> v2 land on identical schemas (tables, columns, FKs, indexes,
-    version). Both paths run the same migration functions, so this AGREES by
-    construction — the teeth against frozen-v1 drift live in
+    """Path-independence consistency check: a db built fresh and a db migrated
+    from v1 land on identical schemas (tables, columns, FKs, indexes, version) at
+    the current TARGET_VERSION. Both paths run the same migration functions, so
+    this AGREES by construction — the teeth against frozen-v1 drift live in
     test_frozen_v1_schema_is_golden; this guards apply()'s path-independence and
     that config_id's FK really lands via ALTER."""
     fresh = storage.open_writer(tmp_path / "fresh" / "abe.db")

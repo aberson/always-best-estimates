@@ -59,7 +59,7 @@ VIEW_SCENARIO_KINDS: Final[frozenset[str]] = frozenset(
 
 _CONFIG_COLUMNS: Final[str] = (
     "config_id, name, feature_set, forecaster, view_scenario_id, optimizer, "
-    "params_json, is_central, created_at_utc"
+    "params_json, is_central, created_at_utc, updated_at_utc"
 )
 _VIEW_SCENARIO_COLUMNS: Final[str] = "view_scenario_id, name, kind, payload_json, created_at_utc"
 
@@ -92,6 +92,7 @@ class Config:
     params: dict[str, object] = field(default_factory=dict)
     is_central: bool = False
     created_at_utc: str | None = None
+    updated_at_utc: str | None = None
 
 
 def _loads(text: str | None) -> dict[str, object]:
@@ -137,6 +138,7 @@ def _config_from_row(row: Sequence[Any]) -> Config:
         params=_loads(row[6]),
         is_central=bool(row[7]),
         created_at_utc=None if row[8] is None else str(row[8]),
+        updated_at_utc=None if row[9] is None else str(row[9]),
     )
 
 
@@ -269,6 +271,7 @@ def create_config(
             "params_json": _dumps(params or {}),
             "is_central": 0,
             "created_at_utc": created,
+            "updated_at_utc": created,
         },
     )
     if config_id is None:  # pragma: no cover — INSERT always yields a rowid
@@ -283,6 +286,7 @@ def create_config(
         params=dict(params or {}),
         is_central=False,
         created_at_utc=created,
+        updated_at_utc=created,
     )
 
 
@@ -339,6 +343,9 @@ def update_config(
     if params is not None:
         updates["params_json"] = _dumps(params)
     if updates:
+        # A recipe edit bumps updated_at_utc so the on-demand cache invalidates
+        # (cached runs computed before this edit are stale).
+        updates["updated_at_utc"] = utc_now_iso()
         assignments = ", ".join(f'"{col}" = ?' for col in updates)
         values = [storage.coerce_scalar(value) for value in updates.values()]
         conn.execute(

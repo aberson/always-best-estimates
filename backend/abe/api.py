@@ -89,12 +89,15 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from abe import config as config_module
 from abe import storage
 from abe.calc import EXPLANATIONS
+from abe.config import Config, ViewScenario
 from abe.ingest.macro import load_fred_api_key, probe_fred_key
 from abe.model import load_model
 from abe.model.base import WorldModel
-from abe.pipeline import latest_ok_central_run_id
+from abe.pipeline import latest_ok_central_run_id, latest_ok_run_id_for_config
+from abe.registry import registries_manifest
 from abe.scheduler import CentralConfigRunError, Scheduler, SchedulerConfig
 
 __all__ = [
@@ -145,6 +148,43 @@ class TriggerRequest(BaseModel):
     """``POST /api/runs/trigger`` body; omitted body means ``force=False``."""
 
     force: bool = False
+
+
+class ConfigCreate(BaseModel):
+    """``POST /api/configs`` body (mirrors the ``configs`` shape, plan §5)."""
+
+    name: str
+    feature_set: str
+    forecaster: str
+    view_scenario_id: int
+    optimizer: str
+    params: dict[str, Any] = {}
+
+
+class ConfigUpdate(BaseModel):
+    """``PATCH /api/configs/{id}`` body — every field optional (partial update)."""
+
+    name: str | None = None
+    feature_set: str | None = None
+    forecaster: str | None = None
+    view_scenario_id: int | None = None
+    optimizer: str | None = None
+    params: dict[str, Any] | None = None
+
+
+class ScenarioCreate(BaseModel):
+    """``POST /api/scenarios`` body (mirrors the ``view_scenarios`` shape)."""
+
+    name: str
+    kind: str
+    payload: dict[str, Any] = {}
+
+
+class ScenarioUpdate(BaseModel):
+    """``PATCH /api/scenarios/{id}`` body — ``kind`` is immutable (author anew)."""
+
+    name: str | None = None
+    payload: dict[str, Any] | None = None
 
 
 def resolve_startup_model(env: Mapping[str, str] | None = None) -> WorldModel:
@@ -230,6 +270,72 @@ def _weight_dicts(conn: sqlite3.Connection, run_id: int) -> list[dict[str, Any]]
         }
         for asset, weight, prev_weight, turnover, relaxed in rows
     ]
+
+
+def _config_payload(config: Config) -> dict[str, Any]:
+    return {
+        "config_id": config.config_id,
+        "name": config.name,
+        "feature_set": config.feature_set,
+        "forecaster": config.forecaster,
+        "view_scenario_id": config.view_scenario_id,
+        "optimizer": config.optimizer,
+        "params": config.params,
+        "is_central": config.is_central,
+        "created_at_utc": config.created_at_utc,
+        "updated_at_utc": config.updated_at_utc,
+    }
+
+
+def _scenario_payload(scenario: ViewScenario) -> dict[str, Any]:
+    return {
+        "view_scenario_id": scenario.view_scenario_id,
+        "name": scenario.name,
+        "kind": scenario.kind,
+        "payload": scenario.payload,
+        "created_at_utc": scenario.created_at_utc,
+    }
+
+
+def _compare_entry(conn: sqlite3.Connection, config_id: int) -> dict[str, Any] | None:
+    """One config's comparison row: its latest ok run's weights + objective, or
+    empty facts when it has no run yet. ``None`` when the config doesn't exist."""
+    config = config_module.get_config(conn, config_id)
+    if config is None:
+        return None
+    run_id = latest_ok_run_id_for_config(conn, config_id)
+    weights: dict[str, float] = {}
+    objective: Any = None
+    finished_at_utc: Any = None
+    if run_id is not None:
+        weights = {
+            str(asset): float(weight)
+            for asset, weight in conn.execute(
+                "SELECT asset, weight FROM target_weights WHERE run_id = ? ORDER BY rowid",
+                (run_id,),
+            ).fetchall()
+        }
+        opt_row = conn.execute(
+            "SELECT detail_json FROM run_stages WHERE run_id = ? AND stage = 'optimize'",
+            (run_id,),
+        ).fetchone()
+        if opt_row is not None and opt_row[0]:
+            parsed = _parsed_detail(opt_row[0])
+            if isinstance(parsed, dict):
+                objective = parsed.get("objective")
+        fin_row = conn.execute(
+            "SELECT finished_at_utc FROM runs WHERE run_id = ?", (run_id,)
+        ).fetchone()
+        finished_at_utc = None if fin_row is None else fin_row[0]
+    return {
+        "config_id": config.config_id,
+        "name": config.name,
+        "is_central": config.is_central,
+        "weights": weights,
+        "objective": objective,
+        "run_id": run_id,
+        "finished_at_utc": finished_at_utc,
+    }
 
 
 def create_app(
@@ -384,6 +490,185 @@ def create_app(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"run_id": result.run_id, "config_id": result.config_id, "cached": result.cached}
+
+    # ------------------------------------------------------------------ #
+    # Config / scenario / compare API (Track 2 Step 25). Writes go through the
+    # scheduler's single writer (one-writer discipline); reads use ro conns.
+    # ------------------------------------------------------------------ #
+
+    @app.get("/api/registries")
+    def registries() -> dict[str, Any]:
+        """Stage-registry manifest (keys + param schemas) for the UI dropdowns."""
+        return {"registries": registries_manifest()}
+
+    @app.get("/api/configs")
+    def list_configs() -> dict[str, Any]:
+        with _read_conn(resolved_path) as conn:
+            return {"configs": [_config_payload(c) for c in config_module.list_configs(conn)]}
+
+    @app.post("/api/configs", status_code=201)
+    async def create_config(body: ConfigCreate, request: Request) -> dict[str, Any]:
+        scheduler: Scheduler = request.app.state.scheduler
+
+        def _write(conn: sqlite3.Connection) -> Config:
+            return config_module.create_config(
+                conn,
+                name=body.name,
+                feature_set=body.feature_set,
+                forecaster=body.forecaster,
+                view_scenario_id=body.view_scenario_id,
+                optimizer=body.optimizer,
+                params=body.params,
+            )
+
+        try:
+            created = await scheduler.run_write(_write)
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail=f"config create conflict: {exc}") from exc
+        return _config_payload(created)
+
+    @app.get("/api/configs/{config_id}")
+    def get_config(config_id: int) -> dict[str, Any]:
+        with _read_conn(resolved_path) as conn:
+            config = config_module.get_config(conn, config_id)
+        if config is None:
+            raise HTTPException(status_code=404, detail=f"unknown config_id {config_id}")
+        return _config_payload(config)
+
+    @app.patch("/api/configs/{config_id}")
+    async def update_config(
+        config_id: int, body: ConfigUpdate, request: Request
+    ) -> dict[str, Any]:
+        scheduler: Scheduler = request.app.state.scheduler
+
+        def _write(conn: sqlite3.Connection) -> Config:
+            return config_module.update_config(
+                conn,
+                config_id,
+                name=body.name,
+                feature_set=body.feature_set,
+                forecaster=body.forecaster,
+                view_scenario_id=body.view_scenario_id,
+                optimizer=body.optimizer,
+                params=body.params,
+            )
+
+        try:
+            updated = await scheduler.run_write(_write)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return _config_payload(updated)
+
+    @app.delete("/api/configs/{config_id}", status_code=204)
+    async def delete_config(config_id: int, request: Request) -> None:
+        scheduler: Scheduler = request.app.state.scheduler
+        with _read_conn(resolved_path) as conn:
+            if config_module.get_config(conn, config_id) is None:
+                raise HTTPException(status_code=404, detail=f"unknown config_id {config_id}")
+
+        def _write(conn: sqlite3.Connection) -> None:
+            config_module.delete_config(conn, config_id)
+
+        try:
+            await scheduler.run_write(_write)
+        except ValueError as exc:  # central / referenced by runs
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/api/configs/{config_id}/central")
+    async def set_central(config_id: int, request: Request) -> dict[str, Any]:
+        """Promote a config to central — the deliberate, guarded operator action."""
+        scheduler: Scheduler = request.app.state.scheduler
+
+        def _write(conn: sqlite3.Connection) -> Config:
+            return config_module.set_central(conn, config_id)
+
+        try:
+            promoted = await scheduler.run_write(_write)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _config_payload(promoted)
+
+    @app.get("/api/scenarios")
+    def list_scenarios() -> dict[str, Any]:
+        with _read_conn(resolved_path) as conn:
+            scenarios = config_module.list_view_scenarios(conn)
+        return {"scenarios": [_scenario_payload(s) for s in scenarios]}
+
+    @app.post("/api/scenarios", status_code=201)
+    async def create_scenario(body: ScenarioCreate, request: Request) -> dict[str, Any]:
+        scheduler: Scheduler = request.app.state.scheduler
+
+        def _write(conn: sqlite3.Connection) -> ViewScenario:
+            return config_module.create_view_scenario(
+                conn, name=body.name, kind=body.kind, payload=body.payload
+            )
+
+        try:
+            created = await scheduler.run_write(_write)
+        except ValueError as exc:  # bad kind
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return _scenario_payload(created)
+
+    @app.patch("/api/scenarios/{scenario_id}")
+    async def update_scenario(
+        scenario_id: int, body: ScenarioUpdate, request: Request
+    ) -> dict[str, Any]:
+        scheduler: Scheduler = request.app.state.scheduler
+
+        def _write(conn: sqlite3.Connection) -> ViewScenario:
+            return config_module.update_view_scenario(
+                conn, scenario_id, name=body.name, payload=body.payload
+            )
+
+        try:
+            updated = await scheduler.run_write(_write)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return _scenario_payload(updated)
+
+    @app.delete("/api/scenarios/{scenario_id}", status_code=204)
+    async def delete_scenario(scenario_id: int, request: Request) -> None:
+        scheduler: Scheduler = request.app.state.scheduler
+        with _read_conn(resolved_path) as conn:
+            if config_module.get_view_scenario(conn, scenario_id) is None:
+                raise HTTPException(
+                    status_code=404, detail=f"unknown view_scenario_id {scenario_id}"
+                )
+
+        def _write(conn: sqlite3.Connection) -> None:
+            config_module.delete_view_scenario(conn, scenario_id)
+
+        try:
+            await scheduler.run_write(_write)
+        except ValueError as exc:  # referenced by a config
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.get("/api/compare")
+    def compare(
+        config_ids: Annotated[str, Query(description="comma-separated config ids")],
+    ) -> dict[str, Any]:
+        """N configs' latest allocations side by side; the central id is flagged.
+
+        Unknown config_ids are silently skipped (a compare view tolerates a
+        stale/deleted id); a config with no run yet returns empty weights + null
+        objective. Weights reflect the config's LATEST run, which may lag a
+        recipe edit until it is re-run via ``POST /api/configs/{id}/run``."""
+        try:
+            ids = [int(token) for token in config_ids.split(",") if token.strip()]
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=422, detail="config_ids must be comma-separated integers"
+            ) from exc
+        if not ids:
+            raise HTTPException(status_code=422, detail="config_ids must not be empty")
+        with _read_conn(resolved_path) as conn:
+            central = config_module.get_central_config(conn)
+            entries = [
+                entry for cid in ids if (entry := _compare_entry(conn, cid)) is not None
+            ]
+        return {"central_config_id": central.config_id, "configs": entries}
 
     # Production static serving (module docstring): mounted LAST so every API
     # route above matches first; conditional so dev/tests without a build

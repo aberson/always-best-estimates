@@ -300,9 +300,26 @@ def _migrate_v1_to_v2(conn: sqlite3.Connection) -> None:
     conn.execute("UPDATE runs SET config_id = ? WHERE config_id IS NULL", (central_id,))
 
 
+# --------------------------------------------------------------------------- #
+# Migration 2 -> 3: configs.updated_at_utc (Track 2 Step 25). Lets the on-demand
+# cache detect a recipe edit — a config edited after its last cached run is stale
+# (abe.pipeline.cached_config_run compares this against the run's started_at_utc).
+# --------------------------------------------------------------------------- #
+
+
+def _migrate_v2_to_v3(conn: sqlite3.Connection) -> None:
+    if not _has_column(conn, "configs", "updated_at_utc"):
+        conn.execute("ALTER TABLE configs ADD COLUMN updated_at_utc TEXT")
+    # Backfill: an un-edited config's "updated" is its creation time.
+    conn.execute(
+        "UPDATE configs SET updated_at_utc = created_at_utc WHERE updated_at_utc IS NULL"
+    )
+
+
 MIGRATIONS: Final[tuple[Migration, ...]] = (
     (0, _migrate_v0_to_v1),
     (1, _migrate_v1_to_v2),
+    (2, _migrate_v2_to_v3),
 )
 
 TARGET_VERSION: Final[int] = len(MIGRATIONS)

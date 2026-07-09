@@ -181,6 +181,22 @@ def test_config_update(writer: sqlite3.Connection) -> None:
     assert updated.is_central is False
 
 
+def test_update_config_bumps_updated_at(writer: sqlite3.Connection) -> None:
+    view_id = _default_view_id(writer)
+    created = config.create_config(
+        writer,
+        name="ttrack",
+        feature_set="basic",
+        forecaster="ewma",
+        view_scenario_id=view_id,
+        optimizer="mvu",
+    )
+    assert created.updated_at_utc == created.created_at_utc  # created == updated at birth
+    updated = config.update_config(writer, created.config_id, optimizer="min_variance")
+    assert updated.updated_at_utc is not None
+    assert updated.updated_at_utc >= (created.updated_at_utc or "")  # bumped (>= at 1s resolution)
+
+
 def test_list_configs_includes_central_and_new(writer: sqlite3.Connection) -> None:
     view_id = _default_view_id(writer)
     config.create_config(
@@ -223,6 +239,23 @@ def test_set_central_moves_the_flag(writer: sqlite3.Connection) -> None:
 def test_set_central_unknown_id_raises(writer: sqlite3.Connection) -> None:
     with pytest.raises(ValueError, match="no config with id"):
         config.set_central(writer, 9999)
+
+
+def test_set_central_preserves_updated_at(writer: sqlite3.Connection) -> None:
+    """Promotion must NOT bump updated_at — is_central isn't a recipe field, so
+    promoting a config must not needlessly bust the on-demand run cache."""
+    view_id = _default_view_id(writer)
+    created = config.create_config(
+        writer,
+        name="promoteme",
+        feature_set="basic",
+        forecaster="ewma",
+        view_scenario_id=view_id,
+        optimizer="mvu",
+    )
+    promoted = config.set_central(writer, created.config_id)
+    assert promoted.is_central is True
+    assert promoted.updated_at_utc == created.updated_at_utc
 
 
 def test_delete_config_refuses_central(writer: sqlite3.Connection) -> None:

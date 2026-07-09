@@ -232,3 +232,32 @@ def test_cached_config_run_recomputes_on_new_data(tmp_path: Path) -> None:
         assert cached_config_run(conn, alt.config_id) is None
     finally:
         conn.close()
+
+
+def test_cache_invalidates_after_recipe_edit(tmp_path: Path) -> None:
+    """A config edited after its last cached run is stale (Step 25 recipe-freshness)."""
+    db_path = tmp_path / "data" / "abe.db"
+    seed_prices(db_path)
+    conn = storage.open_writer(db_path)
+    try:
+        central = config_module.get_central_config(conn)
+        alt = config_module.create_config(
+            conn,
+            name="alt",
+            feature_set="basic",
+            forecaster="ewma",
+            view_scenario_id=central.view_scenario_id,
+            optimizer="mvu",
+        )
+        run_id = run_pipeline(
+            conn, config=alt, trigger="manual", force=True, macro_status=DISABLED_MACRO
+        )
+        assert cached_config_run(conn, alt.config_id) == run_id  # cached on unchanged data
+        # a recipe edit AFTER the run (deterministic future stamp) invalidates it
+        conn.execute(
+            "UPDATE configs SET updated_at_utc = '2099-01-01T00:00:00Z' WHERE config_id = ?",
+            (alt.config_id,),
+        )
+        assert cached_config_run(conn, alt.config_id) is None
+    finally:
+        conn.close()

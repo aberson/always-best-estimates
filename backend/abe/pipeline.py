@@ -292,13 +292,26 @@ def cached_config_run(conn: sqlite3.Connection, config_id: int) -> int | None:
     unchanged data is served from cache, while new/revised prices force a
     recompute. Mirrors :func:`should_skip_run`'s two-watermark rule, per-config.
 
-    LIMITATION (Step 25 closes it): keyed on data watermarks only, NOT the
-    config's recipe — an in-place ``update_config`` that changes the recipe on
-    unchanged data would return the pre-edit run. Safe today (no config-edit API
-    until Step 25); Step 25 must invalidate this cache on ``update_config``."""
+    Recipe freshness (Step 25): a config edited AFTER its last cached run makes
+    that run stale (it was computed under the OLD recipe), so ``updated_at_utc >
+    run.started_at_utc`` forces a recompute even on unchanged data. Residual gap:
+    both stamps are 1-second-resolution, so an edit within the SAME second as the
+    last run's start is not detected (``>`` is strict — ``>=`` would thrash a run
+    that legitimately used the new recipe that second); negligible for a human
+    operator since the compute itself spans seconds."""
     last = latest_ok_run_id_for_config(conn, config_id)
     if last is None:
         return None
+    run_row = conn.execute(
+        "SELECT started_at_utc FROM runs WHERE run_id = ?", (last,)
+    ).fetchone()
+    cfg_row = conn.execute(
+        "SELECT updated_at_utc FROM configs WHERE config_id = ?", (config_id,)
+    ).fetchone()
+    run_started = None if run_row is None or run_row[0] is None else str(run_row[0])
+    updated_at = None if cfg_row is None or cfg_row[0] is None else str(cfg_row[0])
+    if run_started is not None and updated_at is not None and updated_at > run_started:
+        return None  # recipe edited since the cached run — stale
     current_date = stored_data_max_date(conn)
     current_fetched = stored_data_fetched_at(conn)
     cached_date = last_ok_data_max_date(conn, last)
