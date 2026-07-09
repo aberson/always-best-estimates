@@ -1,42 +1,40 @@
 # Task State
 
-**Task:** Track 2 planning → /plan-expedite (build-phase prep)
-**Status:** READY for /build-phase — Steps 16–30 synced to issues #22–#36 (umbrella #21)
-**Last written:** 2026-07-08T17:28:00Z
-**Session SHA:** 7657d99
+**Task:** Track 2 (scenario/compare engine) — /build-phase over docs/track2-scenario-engine-plan.md
+**Status:** COMPLETE — automated Steps 16–28 (sub-phases 2A/2B/2C) all shipped; operator handoff for Steps 29–30
+**Last written:** 2026-07-09T02:05:00Z
+**Session SHA:** 6bd6c62
 
 ## Completed
-- V1 build (Steps 1–14) + Track 1 transparency pass (commits df4b278..c63b33b) shipped + pushed;
-  docs synced (7657d99); Track 1 issue #20 + M1 #17 closed.
-- Track 2 feature plan authored: `docs/track2-scenario-engine-plan.md` (full arc, Steps 16–30,
-  sub-phases 2A/2B/2C). Decisions: full-arc-in-one-plan; SQLite evolved w/ real migrations;
-  central config on the 5-min loop, others on-demand + cached.
-- /plan-expedite ran: plan-review READY (0 autofix) → plan-wrap READY (4 autofixes: shape tables,
-  min-variance optimizer, comparison=derived, API/compare shapes) → repo-sync (umbrella #21 +
-  15 step issues #22–#36; plan Issue: lines backfilled) → task-handoff (this).
+- All 13 automated steps 16–28 DONE + committed (11 checkpoint commits 10ef099..6bd6c62);
+  issues #22–#34 all CLOSED. Goal gates green: `uv run pytest` 497 passed, `uv run mypy backend`
+  clean (32 files), `uv run ruff check .` clean.
+- 2A foundation: migration framework + schema v2/v3 (configs/view_scenarios/runs.config_id +
+  configs.updated_at_utc), Config/ViewScenario CRUD, stage registries, Config-driven run_pipeline
+  (byte-identical parity golden), config-pipeline smoke gate.
+- 2B pluggable stages: on-demand config runs (cached/tagged, single-writer), view sources
+  (forecast/historical/counterfactual + seeded library), optimizer variants (mvu min_weight floor +
+  min_variance), selectable feature sets (fracdiff_macro).
+- 2C UI + API: config/scenario/compare API (one-writer via scheduler.run_write), react-router SPA
+  (HashRouter) — DashboardView, StageDetailTab, CompareView, ScenarioEditor. `npm run build` clean.
+- Real db migrated v1→v3 (backup at data/abe.db.pre-track2-backup); runtime-verified end-to-end on
+  :8140 (min-variance holds AGG=0.60; delete guard 409; library browsable).
 
-## Current State
-- Track 2 plan committed + pushed. GitHub: umbrella #21 open; step issues #22–#36 open.
-  Still open from V1: #16 soak, #18 M2. #1 V1 umbrella.
-- Server may still be running (scratchpad/uvicorn.pid) at 127.0.0.1:8140 on the V1+Track1 build.
-
-## Next Action
-Run `/build-phase --plan docs/track2-scenario-engine-plan.md` to build sub-phase 2A (Steps 16–20:
-migration framework + schema v2 → Config/ViewScenario model → registries → Config-driven
-run_pipeline w/ parity golden → smoke gate). Arm the Stop hook with the /goal over the
-agent-completable span (Steps 16–28; stop before the Step 29 wait + Step 30 operator UAT).
+## Next Action (OPERATOR — not agent-completable; the /build-phase goal STOPPED here by design)
+Two operator/wait steps remain (out of the automated goal scope):
+- **Step 29 (#35, Type: wait):** >=4h soak of the always-on loop + on-demand comparisons; capture
+  `docs/soak/track2-soak-<date>.md`. Resume a fresh session after the wait.
+- **Step 30 (#36, Type: operator):** UAT of the compare + scenario UI (pick impls per stage, author a
+  counterfactual, run a comparison, confirm central stays unambiguous, sanity-check the AGG floor).
+Run `/repo-update` when ready to update README/docs + push the Track 2 work.
 
 ## Critical Gotchas
-- Step 19 (#25) is the risky refactor — the byte-identical **parity golden** (central Config ==
-  pre-refactor run_stages) is the gating regression test; keep the `model` seam back-compat shim.
-- Steps 22/23/24 (#28/#29/#30) are parallel-safe (blend/views vs optimize vs features).
-- Steps 26–28 (#32–#34) are `--reviewers full --ui`; their `:8140` bind collides with a running
-  dev server — free the port before their runtime review.
-- Steps 29 (#35, Type: wait ≥4h soak) and 30 (#36, Type: operator UAT) are NOT agent-completable —
-  /build-phase halts there; they are an operator handoff, not part of the automated /goal.
-- SQLite kept (no Postgres); back up `data/abe.db` before the first real v1→v2 migrate (Step 16).
+- data/abe.db is now schema v3; backup at data/abe.db.pre-track2-backup (delete once satisfied).
+- A stray `min-var-demo` config (config_id 2) + run 104 exist on the real db from runtime verification
+  (a valid min-variance config; delete its run then the config if unwanted).
+- Steps 26–28 landed as ONE cohesive frontend commit (router SPA must build atomically).
 
 ## Key Files
-- `docs/track2-scenario-engine-plan.md` — the Track 2 plan (Steps 16–30, §5 data shapes, §7 steps).
-- Umbrella issue #21; step issues #22–#36.
-- memory `project-v2-scenario-harness-vision` — the operator decisions.
+- Plan: docs/track2-scenario-engine-plan.md (Steps 16–30; 16–28 Status: DONE).
+- backend/abe/{migrations,config,registry,pipeline,scheduler,api}.py; backend/abe/blend/views.py;
+  backend/abe/optimize/{mvu,min_variance}.py; frontend/src/components/*.
