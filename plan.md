@@ -537,4 +537,57 @@ Built via `/build-phase` (one dev agent + 4-reviewer code gauntlet per step; Ste
 | Real price data | `data/abe.db` (gitignored) holds the full backfill (SPY 8415 / ACWI 4597 / AGG 5728 rows); `uv run pytest -m smoke` and `-m realdb` need it. |
 | Test markers | default `uv run pytest` deselects `smoke`/`network`/`realdb` via addopts; the smoke gate NEVER skips vacuously (missing db = failure). |
 
-**Next:** operator runs Step 15 soak (#16), then M1 (#17) / M2 (#18).
+**Next:** operator runs Step 15 soak (#16), then M2 (#18). (M1 UI walkthrough #17 accepted.)
+
+---
+
+## 14. Track 1 — Transparency pass (post-V1, 2026-07-08)
+
+Post-V1 UI-legibility work: make the six stage cards explain themselves **without changing any
+pipeline math**. Shipped in five commits (`df4b278`..`c63b33b`); 412 tests, mypy strict clean,
+ruff clean, real smoke green. Built directly + a build-step 4-reviewer gauntlet on the backend
+relocation and a 2-agent adversarial review on the tweaks.
+
+### What was built
+
+- **`backend/abe/calc.py` (new)** — the single home for the simple calculations, relocated from
+  `features/basic.py` + `blend/confidence.py` (both DELETED): `log_returns`, `realized_vol`,
+  `non_finite_summary`, the feature-name constants, `idzorek_confidence`, `H_TO_ANNUAL`, plus new
+  `annualize_mean` / `annualize_vol`. Each carries a plain formula + worked-example docstring. Adds
+  an `Explanation` dataclass + `EXPLANATIONS` registry (formula/description/example per quantity).
+- **`GET /api/explain`** — serves the registry; the UI renders an inline "how is this computed?"
+  expander per card.
+- **Additive stage-detail enrichments** (no existing key removed/renamed): blend `prior` (π) /
+  `view` (Q) / `covariance_window` (start/end/bars of the common inner-join returns history);
+  ingest `price_provider`; optimize `objective` (δ/γ/w_max + constraints); features `windows`.
+- **Frontend** — cards render the above; Freshness folded into the top bar (5 cards); Optimize
+  consolidated (objective + prev/turnover moved into the expander, total-turnover badge dropped,
+  solver label → "Mean-variance-utility optimization"); BL Blend shows prior→view→posterior; price
+  provenance, feature windows, and the covariance common-window are surfaced.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `backend/abe/calc.py` | NEW — relocated simple calcs + `EXPLANATIONS` registry |
+| `backend/abe/features/basic.py`, `backend/abe/blend/confidence.py` | DELETED — contents relocated to `calc.py` |
+| `backend/abe/pipeline.py` | additive stage-detail enrichments (prior/view/covariance_window/price_provider/objective/windows) |
+| `backend/abe/api.py` | `GET /api/explain` |
+| `backend/abe/ingest/sources.py` | `PRICE_PROVIDER_LABEL` constant |
+| `frontend/src/{api.ts,App.tsx,App.css}`, `frontend/src/components/{StageCard,RunHeader}.tsx` | render enrichments + explain expander; freshness → top bar; card tweaks |
+
+### What was NOT done
+
+Track 1 is display-only. The **AGG = 0% allocation is unchanged** — the crude EWMA forecasts ~0
+bond return and there is no minimum-weight floor. Addressing it (a floor, a stronger prior anchor,
+or a better forecaster) is a Track 2 concern.
+
+### Track 2 (scoped, not started — needs `/plan-feature`)
+
+A pluggable-per-stage **scenario + compare** engine: a detail tab per stage to define/add
+alternatives (feature sets, forecast models, view scenarios, optimizers); main-page dropdowns pick
+the active one at each stage; the dashboard always makes the **central scenario** unmistakable
+("you can only buy one portfolio"); Black-Litterman **view scenarios** — keep forecast-derived
+views, add historical + hand-authored counterfactuals (e.g. "SPY +10%"), pre-programmed library +
+on-the-fly authoring; and a large **run-harness backed by a real database** to track every
+config/run/scenario.

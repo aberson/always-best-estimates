@@ -1,40 +1,39 @@
 # Task State
 
-**Task:** /build-phase --plan plan.md (always-best-estimates V1, Steps 1-14)
-**Status:** COMPLETE
-**Last written:** 2026-07-08T07:10:00Z
+**Task:** Track 1 (transparency pass) for always-best-estimates + repo-update
+**Status:** COMPLETE (pushed to origin/master)
+**Last written:** 2026-07-08T22:08:47Z
 
 ## Completed
-- [814954d] Step 1 Scaffold + constants + observatory registration: PASS iter 2/3 (#2 closed)
-- [0a4ea36] Step 2 SQLite storage module: PASS iter 2/3 (#3 closed)
-- [5bddea2] Step 3 Price ingest yfinance+cache: PASS iter 2/3 (#4 closed; real backfill SPY 8415/ACWI 4597/AGG 5728)
-- [1c1c7cc] Step 4 FRED macro ingest: PASS iter 2/3 (#5 closed; degraded mode live-verified; NO FRED key on machine)
-- [c3edd2b] Step 5 WorldModel + EWMA: PASS iter 2/3 (#6 closed; sigma = H-day PREDICTIVE std decision)
-- [93869a3] Step 6 Blend: PASS iter 1+orch (#7 closed; Idzorek golden pins)
-- [0c78d17] Step 7 MVU optimizer: PASS iter 1+orch (#8 closed; γ_tc=0.002 anchored both directions)
-- [9247289] Step 8 Pipeline+API: PASS iter 2/3 (#9 closed; dual-watermark freshness; two-phase txn)
-- [19a4972] Step 9 Smoke gate: PASS iter 2/3 (#10 closed; -m smoke never skips; SMOKE PASS on real db)
-- [aed3abb] Step 10 React UI: PASS iter 1+orch (#11 closed; 3 runtime reviewers CONFIRMED on Playwright evidence)
-- [77706fc] Step 11 Scheduler: PASS iter 2/3 (#12 closed; structural single-flight; 202-at-START)
-- [887ff02] Step 12 Feature layer: PASS iter 1+orch (#13 closed; per-series merge_asof; garbage anchors)
-- [dc57645] Step 13 Minimal JEPA: PASS iter 2/3 (#14 closed; λ_ret=0.05; DEFAULT ewma)
-- [578d205] Step 14 Walk-forward eval: PASS iter 2/3 (#15 closed; report committed: JEPA promoted thin-margin, DEFAULT still EWMA, promotion manual)
+- V1 build (Steps 1-14) shipped 2026-07-08 (was HEAD 92ae37d).
+- Track 1 transparency pass — 5 commits df4b278..c63b33b:
+  - backend: calc.py relocation (basic.py + confidence.py deleted) + EXPLANATIONS + /api/explain
+    + additive stage-detail enrichments (blend prior/view/covariance_window, ingest price_provider,
+    optimize objective, features windows). Built via build-step (4-reviewer gauntlet).
+  - frontend: render enrichments + inline "how is this computed?" expander; freshness folded into
+    the top bar (5 cards); optimize consolidated; BL blend 3-component view; covariance note.
+  - tweaks reviewed by a 2-agent adversarial pass (both findings fixed).
+- repo-update: README + plan.md §14 + CLAUDE.md refreshed; drift check clean; memory updated;
+  record issue filed + closed; pushed.
+- 412 tests, mypy strict clean, ruff clean, real smoke green.
 
-Final gates (2026-07-08, from project root): pytest 401 passed exit 0; mypy backend clean exit 0; ruff clean exit 0; SMOKE PASS.
+## Current State
+- master pushed to origin. Server running (scratchpad/uvicorn.pid) at 127.0.0.1:8140, macro MACRO_OK.
+- FRED key in gitignored .env (32-char, validated); .env.example is the empty placeholder.
+- Open issues: #1 umbrella, #16 soak (Type: wait), #18 M2. (#17 M1 closed — accepted.)
 
 ## Next Action
-Operator handoff, in order:
-1. Step 15 soak (#16, Type: wait): run the engine ≥4h (`npm run build --prefix frontend` once, then `uv run uvicorn abe.api:app --host 127.0.0.1 --port 8140`), capture docs/soak/soak-<date>.md, then mark Step 15 DONE in plan.md (resume path: /build-phase --plan plan.md --resume 15 is NOT needed — 15 is the last automated-adjacent step).
-2. M1 UI acceptance walkthrough (#17) — commands in plan.md §Manual Steps.
-3. M2 degraded-mode check (#18) — add FRED_API_KEY to .env first (see plan Step 4 Status note), run `uv run pytest -m network` + `uv run python -m abe.ingest.macro --backfill`.
-Also: /repo-update to push (nothing pushed yet — 15 local checkpoint commits on master).
+Operator's choice: (a) Track 2 — pluggable-per-stage scenario/compare engine + run-harness/DB;
+needs /plan-feature (decisions in memory project-v2-scenario-harness-vision); (b) M2 macro backfill
+now that the FRED key works (`uv run pytest -m network` then `uv run python -m abe.ingest.macro
+--backfill`); (c) the >=4h soak (#16).
 
 ## Critical Gotchas
-- NO FRED key on this machine: macro runs in documented degraded mode (MACRO_DISABLED_NO_KEY); operator adds key before M2.
-- Eval verdict: JEPA promoted on thin margin (docs/eval/jepa-vs-ewma-2026-07-08.md) — promotion is MANUAL (ABE_MODEL=jepa + ABE_JEPA_CHECKPOINT); live default remains EWMA.
-- pytest addopts deselect smoke/network/realdb; `uv run pytest -m smoke` is the real-db gate (never skips).
-- data/abe.db (gitignored) holds the real backfill; smoke/realdb tests need it.
+- calc.py is the single home for the simple calcs; basic.py + confidence.py were DELETED.
+- pytest default deselects smoke/network/realdb (intentional); 412 is the baseline.
+- AGG=0% is unchanged by Track 1 (display-only); it's a Track 2 concern (crude EWMA + no floor).
 
 ## Key Files
-- `plan.md`: 14 Status DONE lines + per-step decision notes; §Manual Steps = M1/M2
-- `docs/eval/jepa-vs-ewma-2026-07-08.md`: the committed promotion-decision report
+- `backend/abe/calc.py`, `backend/abe/pipeline.py` (stage-detail enrichments), `backend/abe/api.py`.
+- `frontend/src/components/StageCard.tsx` (card rendering + expander + hiddenExtra).
+- `plan.md` §14 (Track 1 record + Track 2 scope); memory project-v2-scenario-harness-vision.

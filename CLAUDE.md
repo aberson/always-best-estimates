@@ -53,12 +53,13 @@ always-best-estimates/
 ├── data/                        # SQLite db (gitignored)
 ├── backend/abe/
 │   ├── constants.py             # one source of truth (HORIZON_BARS, TRADING_DAYS, UNIVERSE, W_MKT, DELTA…)
+│   ├── calc.py                  # simple calcs (log-return, realized-vol, annualize, idzorek) + Explanation registry
 │   ├── storage.py               # SQLite conn/PRAGMAs/schema/coercion boundary
 │   ├── ingest/ {sources,prices,macro}.py
-│   ├── features/ {basic,build}.py
+│   ├── features/ build.py       # (basic.py relocated into calc.py)
 │   ├── afml/ {fracdiff,purged_cv}.py
 │   ├── model/ {base,jepa,train}.py
-│   ├── blend/ {covariance,confidence,black_litterman}.py
+│   ├── blend/ {covariance,black_litterman}.py   # (confidence.py relocated into calc.py)
 │   ├── optimize/ mvu.py
 │   ├── eval/ walk_forward.py
 │   ├── pipeline.py, scheduler.py, api.py
@@ -84,16 +85,26 @@ always-best-estimates/
   BL posterior via PyPortfolioOpt idzorek mode. Everything in annualized excess returns (rf=0.0 explicit).
 - **Optimize (`optimize/mvu.py`)** — hand-rolled cvxpy mean-variance-utility (`sum_squares(chol.T@w)`,
   not `quad_form`), long-only, box W_MAX=0.6, L1 turnover vs last persisted weights.
+- **Transparency (`calc.py` + `/api/explain`)** — the simple calcs live once in `calc.py`
+  (formula + worked-example docstrings) with an `EXPLANATIONS` registry (formula/description/example
+  per quantity); `GET /api/explain` serves it to the UI's per-card "how is this computed?" expanders.
+  Stage details carry additive explanatory fields (BL prior/view, covariance common-window, price
+  provenance, feature windows, optimizer objective) — surfacing computed data, not new math.
 
 ## 6. Current state
 
-**V1 automated build complete (Steps 1–14, 2026-07-08)** — issues #2–#15 closed; 401 tests, mypy
-strict clean, ruff clean, real smoke green. Six-stage pipeline runs end-to-end on the EWMA default;
-JEPA trained/evaluated behind the toggle; the pre-registered eval
-([`docs/eval/jepa-vs-ewma-2026-07-08.md`](docs/eval/jepa-vs-ewma-2026-07-08.md)) reads "JEPA
-promoted" on a thin margin (honestly: parity) — **live default remains EWMA**, promotion is a
-manual operator action. Remaining: Step 15 soak (#16, ≥4h wait), M1 (#17), M2 (#18 — needs a FRED
-key in `.env` first). Per-step decisions live in `plan.md`'s `**Status:**` lines + §13 Build Record.
+**V1 build complete (Steps 1–14) + Track 1 transparency pass (2026-07-08).** V1: issues #2–#15
+closed; six-stage pipeline end-to-end on the EWMA default; JEPA behind the `ABE_MODEL` toggle; the
+pre-registered eval ([`docs/eval/jepa-vs-ewma-2026-07-08.md`](docs/eval/jepa-vs-ewma-2026-07-08.md))
+reads "JEPA promoted" on a thin margin (honestly: parity) — **live default remains EWMA**, promotion
+is a manual operator action. **Track 1 (post-V1):** stage cards made self-explaining without changing
+any pipeline math — simple calcs relocated to `backend/abe/calc.py` + an `EXPLANATIONS` registry,
+`GET /api/explain` + an inline per-card "how is this computed?" expander, and additive stage-detail
+enrichments (BL prior/view/posterior, price provenance, feature windows, optimizer objective,
+covariance common-window); M1 (#17) accepted/closed. 412 tests, mypy strict clean, ruff clean, real
+smoke green. Remaining operator: Step 15 soak (#16, ≥4h), M2 (#18 — FRED key now configured, run the
+macro backfill). Track 2 (pluggable-per-stage scenario/compare engine + run-harness) scoped, not
+started. Per-step decisions live in `plan.md`'s `**Status:**` lines + §13 Build Record + §14 (Track 1).
 
 ## 7. Environment requirements
 

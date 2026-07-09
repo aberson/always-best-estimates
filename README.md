@@ -70,8 +70,8 @@ app; a run fires at startup, then every 5 minutes / on the refresh button.
 ## Project layout
 
 ```
-backend/abe/   constants.py, storage.py, ingest/, features/, afml/, model/, blend/, optimize/,
-               eval/, pipeline.py, scheduler.py, api.py
+backend/abe/   constants.py, calc.py (simple calcs + explain registry), storage.py, ingest/,
+               features/, afml/, model/, blend/, optimize/, eval/, pipeline.py, scheduler.py, api.py
 frontend/      React + Vite (one card per pipeline stage)
 data/          SQLite db (gitignored)
 docs/          seed-hardening research + docs/eval/ (committed walk-forward eval reports)
@@ -87,8 +87,18 @@ AFML feature layer, minimal JEPA (41.8k params) behind the `ABE_MODEL` toggle, a
 pre-registered walk-forward eval committed at
 [`docs/eval/jepa-vs-ewma-2026-07-08.md`](docs/eval/jepa-vs-ewma-2026-07-08.md) (mechanical verdict
 "JEPA promoted" on a thin margin, honestly read as parity — the live default remains EWMA;
-promotion is a manual operator action). 401 tests passing, 0 type errors, 0 lint violations;
-real end-to-end smoke green (`uv run pytest -m smoke`).
+promotion is a manual operator action).
 
-**Remaining (operator):** Step 15 soak (#16, ≥4h wait), M1 UI walkthrough (#17), M2 degraded-mode
-check (#18 — needs a FRED key in `.env` first). Details in [`plan.md`](plan.md) §Manual Steps.
+**Track 1 — Transparency pass (post-V1)** — made the stage cards self-explaining **without
+changing any pipeline math**: relocated the simple calculations into a single transparent
+`backend/abe/calc.py` (formula + worked example per quantity), added a `GET /api/explain` endpoint
++ an inline "how is this computed?" expander per card, and surfaced already-computed detail
+(Black-Litterman prior/view/posterior, price provenance, feature windows, the optimizer objective,
+the covariance common-window). M1 UI walkthrough accepted (#17 closed).
+
+412 tests passing, 0 type errors, 0 lint violations; real end-to-end smoke green
+(`uv run pytest -m smoke`).
+
+**Remaining (operator):** Step 15 soak (#16, ≥4h wait), M2 degraded-mode check (#18 — the FRED key
+is now configured, so run the macro backfill). Track 2 (a pluggable-per-stage scenario/compare
+engine + run-harness) is scoped but not started. Details in [`plan.md`](plan.md) §13–§14.
