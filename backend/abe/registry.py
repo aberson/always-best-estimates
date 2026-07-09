@@ -52,6 +52,7 @@ from abe.calc import (
 )
 from abe.config import Config, ViewScenario
 from abe.constants import DELTA, HORIZON_BARS, UNIVERSE, W_MAX
+from abe.features.build import FEATURE_NAME_SEP, build_features, feature_column
 from abe.model import load_model
 from abe.model.base import DEFAULT_HALFLIFE, EWMABaseline, WorldModel
 from abe.optimize.min_variance import min_variance_weights
@@ -115,9 +116,12 @@ class FeatureBundle:
 class FeatureBuilder(Protocol):
     key: str
 
-    def build(self, frames: Mapping[str, pd.DataFrame]) -> FeatureBundle:
-        """Turn per-asset price frames (each with an ``adj_close`` column) into a
-        :class:`FeatureBundle` over the fixed ``UNIVERSE``."""
+    def build(
+        self, frames: Mapping[str, pd.DataFrame], macro: pd.DataFrame | None = None
+    ) -> FeatureBundle:
+        """Turn per-asset price frames (each with an ``adj_close`` column) — plus
+        the optional long-form ``macro`` table — into a :class:`FeatureBundle`
+        over the fixed ``UNIVERSE``. ``basic`` ignores ``macro``."""
         ...
 
 
@@ -126,11 +130,14 @@ class BasicFeatureBuilder:
 
     Reproduces the pre-Track-2 ``_stage_features`` exactly — the returns, the
     persisted rows (log_return then realized_vol per asset), and a ``detail``
-    that is byte-identical to V1 (Step 19's parity golden pins this)."""
+    that is byte-identical to V1 (Step 19's parity golden pins this). Ignores
+    ``macro``."""
 
     key = "basic"
 
-    def build(self, frames: Mapping[str, pd.DataFrame]) -> FeatureBundle:
+    def build(
+        self, frames: Mapping[str, pd.DataFrame], macro: pd.DataFrame | None = None
+    ) -> FeatureBundle:
         returns: dict[str, pd.Series] = {}
         features_frames: dict[str, pd.DataFrame] = {}
         rows: list[dict[str, object]] = []
@@ -158,8 +165,75 @@ class BasicFeatureBuilder:
         return FeatureBundle(returns, features_frames, rows, detail)
 
 
+class FracDiffMacroFeatureBuilder:
+    """``fracdiff_macro``: the ``build_features`` path — log-return + realized-vol
+    per asset joined with lookahead-free point-in-time FRED **macro** columns.
+
+    Reuses ``abe.features.build.build_features`` (one source of truth for the
+    matrix assembly + the ``merge_asof`` no-lookahead macro join). Frac-diff
+    columns are OMITTED here (``params=None``): a fixed-width FFD needs the
+    per-training-fold-frozen ``d`` (fracdiff.py's leakage discipline), which the
+    live pipeline does not have — they activate when the training path supplies
+    frozen params. The forecaster consumes the richer per-asset frames (it still
+    reads ``log_return``); the blend still uses the FULL per-asset returns."""
+
+    key = "fracdiff_macro"
+
+    def build(
+        self, frames: Mapping[str, pd.DataFrame], macro: pd.DataFrame | None = None
+    ) -> FeatureBundle:
+        prices = {asset: frames[asset]["adj_close"] for asset in UNIVERSE}
+        matrix = build_features(prices, macro, params=None)
+        macro_columns = [
+            col
+            for col in matrix.columns
+            if not any(str(col).startswith(f"{asset}{FEATURE_NAME_SEP}") for asset in UNIVERSE)
+        ]
+        per_asset_names = [LOG_RETURN_COLUMN, REALIZED_VOL_COLUMN]
+
+        returns: dict[str, pd.Series] = {
+            asset: log_returns(prices[asset]) for asset in UNIVERSE
+        }
+        features_frames: dict[str, pd.DataFrame] = {}
+        rows: list[dict[str, object]] = []
+        latest: dict[str, dict[str, object]] = {}
+        for asset in UNIVERSE:
+            prefix = f"{asset}{FEATURE_NAME_SEP}"
+            per_asset = {
+                str(col)[len(prefix) :]: matrix[col]
+                for col in matrix.columns
+                if str(col).startswith(prefix)
+            }
+            frame = pd.DataFrame(per_asset, index=matrix.index)
+            for col in macro_columns:
+                frame[col] = matrix[col]
+            features_frames[asset] = frame
+            values = {
+                name: float(matrix[feature_column(asset, name)].iloc[-1])
+                for name in per_asset_names
+            }
+            for name, value in values.items():
+                rows.append({"asset": asset, "name": name, "value": value})
+            latest[asset] = {"date": str(matrix.index[-1]), **values}
+        detail: dict[str, object] = {
+            "feature_set": "fracdiff_macro",
+            "features": per_asset_names,
+            "macro_columns": macro_columns,
+            "windows": {
+                LOG_RETURN_COLUMN: "1 day",
+                REALIZED_VOL_COLUMN: f"{HORIZON_BARS} days, annualized",
+            },
+            "latest": latest,
+        }
+        return FeatureBundle(returns, features_frames, rows, detail)
+
+
 def _basic_feature_factory(_params: Mapping[str, object]) -> FeatureBuilder:
     return BasicFeatureBuilder()
+
+
+def _fracdiff_macro_feature_factory(_params: Mapping[str, object]) -> FeatureBuilder:
+    return FracDiffMacroFeatureBuilder()
 
 
 FEATURE_BUILDERS: Final[dict[str, RegistryEntry[FeatureBuilder]]] = {
@@ -167,6 +241,11 @@ FEATURE_BUILDERS: Final[dict[str, RegistryEntry[FeatureBuilder]]] = {
         factory=_basic_feature_factory,
         param_schema=(),
         description="Log-return + realized-vol (the V1 feature set); no parameters.",
+    ),
+    "fracdiff_macro": RegistryEntry(
+        factory=_fracdiff_macro_feature_factory,
+        param_schema=(),
+        description="build_features path: log-return + realized-vol + lookahead-free FRED macro.",
     ),
 }
 

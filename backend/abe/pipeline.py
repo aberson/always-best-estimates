@@ -523,10 +523,25 @@ def _stage_ingest(ctx: _RunContext) -> tuple[str, dict[str, object]]:
     return ("ok", detail)
 
 
+def _load_macro_frame(conn: sqlite3.Connection) -> pd.DataFrame:
+    """Long-form macro table for the feature builder's lookahead-free join.
+
+    Columns match ``build_features``'s join keys (``series_id``, ``obs_date``,
+    ``value``, ``available_date``). An empty frame (no macro stored — degraded
+    mode or pre-backfill) makes ``build_features`` omit macro columns, never
+    error. The ``basic`` builder ignores the frame entirely (parity)."""
+    rows = conn.execute(
+        "SELECT series_id, obs_date, value, available_date FROM macro"
+    ).fetchall()
+    return pd.DataFrame(rows, columns=["series_id", "obs_date", "value", "available_date"])
+
+
 def _stage_features(ctx: _RunContext) -> tuple[str, dict[str, object]]:
     # The resolved feature builder owns the math + the card detail; the pipeline
     # owns persistence (adding run_id) and threading returns/frames downstream.
-    bundle = ctx.stack.feature_builder.build(ctx.frames)
+    # Macro is loaded only when enabled; `basic` ignores it (byte-identical V1).
+    macro = _load_macro_frame(ctx.conn) if ctx.macro_status.enabled else None
+    bundle = ctx.stack.feature_builder.build(ctx.frames, macro)
     ctx.returns = dict(bundle.returns)
     ctx.features_frames = dict(bundle.features_frames)
     for row in bundle.rows:

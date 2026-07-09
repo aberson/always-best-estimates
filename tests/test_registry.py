@@ -187,7 +187,7 @@ def test_forecaster_override_supersedes_broken_config_forecaster(
 def test_registries_manifest_shape() -> None:
     manifest = registry.registries_manifest()
     assert set(manifest) == {"feature_set", "forecaster", "view_source", "optimizer"}
-    assert set(manifest["feature_set"]) == {"basic"}
+    assert set(manifest["feature_set"]) == {"basic", "fracdiff_macro"}
     assert set(manifest["forecaster"]) == {"ewma", "jepa"}
     assert set(manifest["view_source"]) == {"forecast", "historical", "counterfactual"}
     assert set(manifest["optimizer"]) == {"mvu", "min_variance"}

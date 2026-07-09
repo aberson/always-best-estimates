@@ -258,6 +258,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** feature-builder registrations; `_stage_features` reads the resolved builder.
 - **Done when:** a test runs the pipeline under both feature sets and asserts the feature card/detail reflects the chosen set; `basic` remains byte-identical to V1; `uv run pytest` green.
 - **Depends on:** 18
+- **Status:** DONE (2026-07-08)
 
 ### Sub-phase 2C — Compare + scenario UI
 
