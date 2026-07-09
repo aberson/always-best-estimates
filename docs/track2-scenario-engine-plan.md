@@ -194,6 +194,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `backend/abe/registry.py`, registrations for existing impls, a `resolve(config)` function.
 - **Done when:** registry tests assert each key resolves to a working callable and its param schema; `resolve(central_config)` returns the V1 stack; `uv run pytest` green.
 - **Depends on:** 17
+- **Status:** DONE (2026-07-08)
 
 ### Step 19: Refactor `run_pipeline` to run a resolved Config (parity golden)
 - **Problem:** Refactor `run_pipeline` to accept a `Config` (resolve stage impls via the registry) and persist `config_id` on the `runs` row. Update the scheduler to run the **central** Config (`SchedulerConfig` carries the Config; keep a back-compat shim for the `model` seam used by tests). The central Config must reproduce V1 behavior exactly.
