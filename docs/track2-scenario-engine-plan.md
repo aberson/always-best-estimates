@@ -184,6 +184,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `backend/abe/config.py`, CRUD helpers, seed logic wired into the Step 16 migration.
 - **Done when:** round-trip CRUD tests pass; exactly one `is_central` Config exists after a fresh migrate; `uv run pytest` green.
 - **Depends on:** 16
+- **Status:** DONE (2026-07-08)
 
 ### Step 18: Stage registries + param schemas
 - **Problem:** Add `backend/abe/registry.py` with four string-keyed registries (feature-builder, forecaster, view-source, optimizer), each entry declaring a factory + a param schema. Register the current impls: `basic` features, `ewma`+`jepa` forecasters, `forecast` view source, `mvu` optimizer. A resolver turns a `Config` into concrete stage callables.
