@@ -54,6 +54,10 @@ uv run uvicorn abe.api:app --host 127.0.0.1 --port 8140
 Open `http://127.0.0.1:5174` (dev) or `http://127.0.0.1:8140` (prod). The scheduler starts with the
 app; a run fires at startup, then every 5 minutes / on the refresh button.
 
+**One-click (dev):** `.\scripts\launch-abe.ps1` starts the backend + Vite each in its own window and
+opens the app in Chrome (falls back to the default browser if Chrome is absent). It's also surfaced
+as dev-observatory's one-click **`run`** button.
+
 ## Key design decisions
 
 - **Skeleton-first.** The EWMA baseline drives BL → optimizer → UI → scheduler end-to-end before any
@@ -75,7 +79,7 @@ backend/abe/   constants.py, calc.py (simple calcs + explain registry), storage.
 frontend/      React + Vite (per-stage cards + compare / scenario-authoring views, HashRouter)
 data/          SQLite db (gitignored)
 docs/          seed-hardening research + docs/eval/ (committed walk-forward eval reports)
-scripts/       smoke.py (real end-to-end gate, exit 0/1/3)
+scripts/       smoke.py (real end-to-end gate, exit 0/1/3), launch-abe.ps1 (one-click backend+Vite+Chrome launcher)
 plan.md        full build plan (15 automated steps + M1/M2 operator UAT; per-step Status records)
 ```
 

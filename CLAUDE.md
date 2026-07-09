@@ -41,6 +41,7 @@ uv run python -m abe.ingest.macro --backfill               # one-time macro back
 uv run uvicorn abe.api:app --host 127.0.0.1 --port 8140    # run backend (starts scheduler)
 npm run dev --prefix frontend                              # run Vite dev server on 127.0.0.1:5174
 npm run build --prefix frontend                            # build UI (prod: FastAPI serves it)
+.\scripts\launch-abe.ps1                                     # one-click: start backend + Vite + open Chrome (= dev-observatory `run` button)
 uv run pytest                                              # run tests (smoke/network/realdb deselected)
 uv run pytest -m smoke                                     # real end-to-end smoke gate (needs data/abe.db; NEVER skips)
 uv run ruff check .                                        # lint
@@ -72,7 +73,7 @@ always-best-estimates/
 │   ├── eval/ walk_forward.py
 │   ├── pipeline.py, scheduler.py, api.py
 ├── frontend/ (vite.config.ts, src/{App.tsx,api.ts,components/{DashboardView,StageDetailTab,CompareView,ScenarioEditor,StageCard,RunHeader}.tsx})
-├── scripts/ (smoke.py)
+├── scripts/ (smoke.py, launch-abe.ps1)
 ├── docs/eval/                   # committed walk-forward eval reports
 └── tests/ (+ tests/seeding.py + tests/conftest.py shared helpers)
 ```
