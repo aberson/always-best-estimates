@@ -32,11 +32,18 @@ pre-Track-2 ``_stage_features``, an ``EWMABaseline``, the ``forecast`` view sour
 """
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Final, Protocol
 
 import pandas as pd
 
+from abe.blend.views import (
+    ViewContext,
+    ViewSource,
+    counterfactual_view_factory,
+    forecast_view_factory,
+    historical_view_factory,
+)
 from abe.calc import (
     LOG_RETURN_COLUMN,
     REALIZED_VOL_COLUMN,
@@ -46,7 +53,7 @@ from abe.calc import (
 from abe.config import Config, ViewScenario
 from abe.constants import HORIZON_BARS, UNIVERSE
 from abe.model import load_model
-from abe.model.base import DEFAULT_HALFLIFE, EWMABaseline, Forecast, WorldModel
+from abe.model.base import DEFAULT_HALFLIFE, EWMABaseline, WorldModel
 from abe.optimize.mvu import MVUResult, optimize_weights
 
 __all__ = [
@@ -214,49 +221,47 @@ FORECASTERS: Final[dict[str, RegistryEntry[WorldModel]]] = {
 
 
 # --------------------------------------------------------------------------- #
-# View sources (produce {asset: Forecast} for bl_blend)
+# View sources (produce {asset: Forecast} for bl_blend). The impls live in
+# abe.blend.views; ViewContext / ViewSource are re-exported here so the pipeline
+# keeps using registry.ViewContext / registry.resolve(...).view_source.
 # --------------------------------------------------------------------------- #
-
-
-@dataclass(frozen=True, slots=True)
-class ViewContext:
-    """The per-run data a view source needs. ``forecasts`` are the run's model
-    forecasts (used by ``forecast``); ``returns`` are per-asset log-return Series
-    (used by ``historical``, Step 22). The ViewScenario payload is NOT here — a
-    source captures its own payload at construction (the factory takes it), the
-    same way the forecaster/optimizer capture their params."""
-
-    forecasts: dict[str, Forecast]
-    returns: dict[str, pd.Series] = field(default_factory=dict)
-
-
-class ViewSource(Protocol):
-    kind: str
-
-    def provide(self, ctx: ViewContext) -> dict[str, Forecast]:
-        """Produce ``{asset: Forecast}`` (H-day pairs) for ``bl_blend`` to blend."""
-        ...
-
-
-class ForecastViewSource:
-    """``forecast``: views ARE the model's forecasts (the V1 behavior). Identity
-    on ``ctx.forecasts`` — so a central/forecast Config reproduces V1 exactly."""
-
-    kind = "forecast"
-
-    def provide(self, ctx: ViewContext) -> dict[str, Forecast]:
-        return dict(ctx.forecasts)
-
-
-def _forecast_view_factory(_payload: Mapping[str, object]) -> ViewSource:
-    return ForecastViewSource()
 
 
 VIEW_SOURCES: Final[dict[str, RegistryEntry[ViewSource]]] = {
     "forecast": RegistryEntry(
-        factory=_forecast_view_factory,
+        factory=forecast_view_factory,
         param_schema=(),
         description="Views derived from the run's forecaster (the V1 view source).",
+    ),
+    "historical": RegistryEntry(
+        factory=historical_view_factory,
+        param_schema=(
+            ParamSpec(
+                name="window_start",
+                type="str",
+                default=None,
+                description="ISO start date of the realized-return window (optional).",
+            ),
+            ParamSpec(
+                name="window_end",
+                type="str",
+                default=None,
+                description="ISO end date of the realized-return window (optional).",
+            ),
+        ),
+        description="Absolute views from a past window's realized returns.",
+    ),
+    "counterfactual": RegistryEntry(
+        factory=counterfactual_view_factory,
+        param_schema=(
+            ParamSpec(
+                name="views",
+                type="str",
+                default=None,
+                description="Per-asset {mu: annual return, confidence: 0..1} hand-authored views.",
+            ),
+        ),
+        description="Hand-authored absolute views (e.g. SPY +10%).",
     ),
 }
 

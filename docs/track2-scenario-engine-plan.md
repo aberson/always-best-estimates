@@ -237,6 +237,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** `backend/abe/blend/views.py`, three providers, library seeds, ViewScenario CRUD wiring.
 - **Done when:** golden tests — `forecast` reproduces today's views; a counterfactual view materially moves the posterior toward it; a historical window yields the expected sign; `uv run pytest` green.
 - **Depends on:** 18, 21
+- **Status:** DONE (2026-07-08)
 
 <!-- autofix-applied: 2026-07-08 -->
 ### Step 23: Optimizer variants — MVU min-weight floor + min-variance
