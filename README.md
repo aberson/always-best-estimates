@@ -19,10 +19,10 @@ pre-registered walk-forward evaluation against the baseline.
 | Backend | FastAPI + uvicorn (single worker, no `--reload`) |
 | Scheduler | asyncio lifespan task + `ThreadPoolExecutor(max_workers=1)` |
 | ML | PyTorch (minimal JEPA) |
-| Portfolio math | PyPortfolioOpt `==1.6.0` (Black-Litterman + Ledoit-Wolf) |
+| Portfolio math | PyPortfolioOpt `==1.6.0` (Black-Litterman + Ledoit-Wolf), scipy (`erfinv`, view-source math) |
 | Optimizer | cvxpy (solver `CLARABEL`) |
 | Data | yfinance `>=1.5` (prices), fredapi (macro), SQLite (WAL) cache |
-| Frontend | React + Vite (TypeScript) |
+| Frontend | React + Vite (TypeScript) + react-router-dom (HashRouter) |
 
 Ports: backend `127.0.0.1:8140`, Vite dev `127.0.0.1:5174`.
 
@@ -72,7 +72,7 @@ app; a run fires at startup, then every 5 minutes / on the refresh button.
 ```
 backend/abe/   constants.py, calc.py (simple calcs + explain registry), storage.py, ingest/,
                features/, afml/, model/, blend/, optimize/, eval/, pipeline.py, scheduler.py, api.py
-frontend/      React + Vite (one card per pipeline stage)
+frontend/      React + Vite (per-stage cards + compare / scenario-authoring views, HashRouter)
 data/          SQLite db (gitignored)
 docs/          seed-hardening research + docs/eval/ (committed walk-forward eval reports)
 scripts/       smoke.py (real end-to-end gate, exit 0/1/3)
@@ -96,9 +96,23 @@ changing any pipeline math**: relocated the simple calculations into a single tr
 (Black-Litterman prior/view/posterior, price provenance, feature windows, the optimizer objective,
 the covariance common-window). M1 UI walkthrough accepted (#17 closed).
 
-412 tests passing, 0 type errors, 0 lint violations; real end-to-end smoke green
+**Track 2 — Pluggable-per-stage scenario + compare engine (post-Track-1)** — automated Steps
+16–28 (issues #22–#34 closed). A forward-only schema migration framework (`backend/abe/migrations.py`,
+v1→v3) backs new `configs` / `view_scenarios` tables; `run_pipeline` now executes a resolved
+**Config** (byte-identical V1 parity golden) drawn from four string-keyed stage registries
+(`backend/abe/registry.py`: feature-builder / forecaster / view-source / optimizer). New stage impls
+land additively — historical + counterfactual Black-Litterman view sources (`backend/abe/blend/views.py`),
+a `min_variance` optimizer + an MVU `min_weight` floor (fixes the V1 AGG=0% corner), and a
+`fracdiff_macro` feature set. A new API route group (`/api/registries`, `/api/configs`,
+`/api/scenarios`, `/api/compare`) drives new React views — a **compare** grid, a **scenario-authoring**
+editor, and **per-stage detail tabs** — routed via `react-router-dom` (HashRouter). The central
+Config runs the 5-min loop; non-central Configs run on-demand, cached by `config_id` and serialized
+through the single writer.
+
+497 tests passing, 0 type errors (32 source files), 0 lint violations; real end-to-end smoke green
 (`uv run pytest -m smoke`).
 
-**Remaining (operator):** Step 15 soak (#16, ≥4h wait), M2 degraded-mode check (#18 — the FRED key
-is now configured, so run the macro backfill). Track 2 (a pluggable-per-stage scenario/compare
-engine + run-harness) is scoped but not started. Details in [`plan.md`](plan.md) §13–§14.
+**Remaining (operator):** Track 2 Step 29 soak (#35, ≥4h wait) + Step 30 UAT (#36); V1 Step 15 soak
+(#16, ≥4h wait); M2 degraded-mode check (#18 — the FRED key is now configured, so run the macro
+backfill). Track 2 detail lives in [`docs/track2-scenario-engine-plan.md`](docs/track2-scenario-engine-plan.md)
+(Steps 16–30; 16–28 marked DONE); V1 per-step records in [`plan.md`](plan.md) §13–§14.

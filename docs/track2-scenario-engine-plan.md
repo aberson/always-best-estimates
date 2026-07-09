@@ -270,7 +270,7 @@ without losing the single, unambiguous "central" answer.
 - **Produces:** the `/api/configs`, `/api/scenarios`, `/api/compare` route group.
 - **Done when:** API tests cover CRUD, set-central invariant (exactly one central), and a comparison payload shape; `uv run pytest` green.
 - **Depends on:** 21, 22, 23, 24
-- **Status:** DONE (2026-07-08)
+- **Status:** DONE (2026-07-08) — also bumped the schema to **v3** (added `configs.updated_at_utc` for the on-demand recipe-edit cache invalidation; §5's v2 shapes are the Step-16 baseline). API also exposes `GET /api/registries` + reuses `POST /api/configs/{id}/central` and `/run` (Step 21).
 
 ### Step 26: Frontend shell — router, central dashboard, per-stage detail tabs
 - **Problem:** Introduce `react-router-dom`. Keep the central-scenario dashboard as the default route; add per-stage detail tabs (features / forecast / blend / optimize) with dropdowns to pick the implementation + edit its params (param schema from the registry), previewing the effect on the active Config.

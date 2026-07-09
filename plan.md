@@ -582,9 +582,20 @@ Track 1 is display-only. The **AGG = 0% allocation is unchanged** — the crude 
 bond return and there is no minimum-weight floor. Addressing it (a floor, a stronger prior anchor,
 or a better forecaster) is a Track 2 concern.
 
-### Track 2 (scoped, not started — needs `/plan-feature`)
+### Track 2 — Scenario + compare engine (automated build DONE, 2026-07-08)
 
-A pluggable-per-stage **scenario + compare** engine: a detail tab per stage to define/add
+Built via `/build-phase` over Steps 16–28 (sub-phases 2A/2B/2C); issues #22–#34 closed. Full
+sub-plan: [`docs/track2-scenario-engine-plan.md`](docs/track2-scenario-engine-plan.md). Schema
+evolved v1→v3 via a new forward-only migration framework (`backend/abe/migrations.py`); new backend
+modules `config.py`, `registry.py`, `blend/views.py`, `optimize/min_variance.py`; `run_pipeline`
+refactored to run a resolved Config (byte-identical parity golden); the central Config runs on the
+5-min loop, non-central Configs on-demand (cached, single-writer via the one executor); a new
+`/api/registries` + `/api/configs` + `/api/scenarios` + `/api/compare` route group; the frontend
+gained `react-router-dom` + `DashboardView`/`StageDetailTab`/`CompareView`/`ScenarioEditor`. 497
+tests pass; mypy strict + ruff clean. **Remaining (operator handoff, not done):** Step 29 soak
+(#35, `Type: wait`) + Step 30 operator UAT (#36).
+
+Original vision — a pluggable-per-stage **scenario + compare** engine: a detail tab per stage to define/add
 alternatives (feature sets, forecast models, view scenarios, optimizers); main-page dropdowns pick
 the active one at each stage; the dashboard always makes the **central scenario** unmistakable
 ("you can only buy one portfolio"); Black-Litterman **view scenarios** — keep forecast-derived
