@@ -307,6 +307,7 @@ without losing the single, unambiguous "central" answer.
 - **Type:** wait
 - **Issue:** #35
 - **Produces:** `docs/soak/track2-soak-<date>.md`.
+- **Harness:** `scripts/soak.py` — automated + hands-off. Drives the on-demand path (alternating cache/fresh config runs + `/api/compare`) and samples DB/WAL size, stuck-`running` rows, error runs, and backend RSS on timers, then writes the findings file with a PASS/ATTENTION verdict. Run (backend up first): `uv run python scripts/soak.py --hours 4`.
 - **Done when:** ≥4h continuous; the loop keeps the central Config fresh; on-demand runs interleave without writer errors; no unhandled crash; findings captured. (Resume in a fresh session after the wait.)
 - **Depends on:** 25
 
