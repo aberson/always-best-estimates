@@ -1,40 +1,26 @@
 # Task State
 
-**Task:** Track 2 (scenario/compare engine) — /build-phase over docs/track2-scenario-engine-plan.md
-**Status:** COMPLETE — automated Steps 16–28 (sub-phases 2A/2B/2C) all shipped; operator handoff for Steps 29–30
-**Last written:** 2026-07-09T02:05:00Z
-**Session SHA:** 6bd6c62
+**Task:** always-best-estimates — post-Track-2 operator handoff (Track 2 fully built + soaked; only UAT + old V1 items remain)
+**Status:** Track 2 COMPLETE incl. Step 29 soak (PASS, #35 closed). Launcher + automated soak harness shipped this window. Remaining work is OPERATOR-only.
+**Last written:** 2026-07-15T17:59:00Z
+**Session SHA:** 3312bd7
 
-## Completed
-- All 13 automated steps 16–28 DONE + committed (11 checkpoint commits 10ef099..6bd6c62);
-  issues #22–#34 all CLOSED. Goal gates green: `uv run pytest` 497 passed, `uv run mypy backend`
-  clean (32 files), `uv run ruff check .` clean.
-- 2A foundation: migration framework + schema v2/v3 (configs/view_scenarios/runs.config_id +
-  configs.updated_at_utc), Config/ViewScenario CRUD, stage registries, Config-driven run_pipeline
-  (byte-identical parity golden), config-pipeline smoke gate.
-- 2B pluggable stages: on-demand config runs (cached/tagged, single-writer), view sources
-  (forecast/historical/counterfactual + seeded library), optimizer variants (mvu min_weight floor +
-  min_variance), selectable feature sets (fracdiff_macro).
-- 2C UI + API: config/scenario/compare API (one-writer via scheduler.run_write), react-router SPA
-  (HashRouter) — DashboardView, StageDetailTab, CompareView, ScenarioEditor. `npm run build` clean.
-- Real db migrated v1→v3 (backup at data/abe.db.pre-track2-backup); runtime-verified end-to-end on
-  :8140 (min-variance holds AGG=0.60; delete guard 409; library browsable).
+## Completed (this window, after the Track 2 build)
+- One-click launcher `scripts/launch-abe.ps1` (#38 closed): starts backend (:8140) + Vite (:5174) + opens Chrome; idempotent. Surfaced as dev-observatory's `run` button via a `launch=` pointer in `dev/.claude/observatory/registry.toml`. Committed fb31c08 + docs ce3b7d8; pushed.
+- Macro backfill (#18 data half): 6 FRED series populated (unlocks the `fracdiff_macro` feature set). Degraded-mode *check* still owed.
+- Automated soak harness `scripts/soak.py` (committed 7f99f61): hands-off; drives on-demand load + samples DB/WAL/stuck-rows/RSS + writes a PASS/ATTENTION verdict.
+- **Step 29 soak PASS (#35 closed):** 4h, 79 on-demand + 48 loop runs, 0 writer errors, 40/40 force=false cache hits, 0 stuck/error rows, WAL bounded at 0 MB, RSS steady ~73 MB. Findings `docs/soak/track2-soak-2026-07-11.md` committed 3312bd7; independently db-verified. Backend has since run ~2 more days / 1331 runs total, still 0 stuck/error.
 
-## Next Action (OPERATOR — not agent-completable; the /build-phase goal STOPPED here by design)
-Two operator/wait steps remain (out of the automated goal scope):
-- **Step 29 (#35, Type: wait):** >=4h soak of the always-on loop + on-demand comparisons; capture
-  `docs/soak/track2-soak-<date>.md`. Resume a fresh session after the wait.
-- **Step 30 (#36, Type: operator):** UAT of the compare + scenario UI (pick impls per stage, author a
-  counterfactual, run a comparison, confirm central stays unambiguous, sanity-check the AGG floor).
-Run `/repo-update` when ready to update README/docs + push the Track 2 work.
+## Next Action (OPERATOR — not agent-completable)
+- **Step 30 UAT (#36):** compare + scenario UI acceptance — pick impls per stage, author a counterfactual, run a comparison, confirm the central scenario stays unambiguous, sanity-check the AGG floor (a `min_weight` config shows non-zero AGG). Agent-assist available: `/user-uat --ui` (mechanical + vision-judged tiers) or `/user-walkthrough` (attended). Launch first: `scripts/launch-abe.ps1`.
+- **V1 leftovers:** Step 15 soak (#16, `Type: wait` — `scripts/soak.py` can drive it); M2 degraded-mode check (#18 — FRED key set + macro now backfilled).
 
 ## Critical Gotchas
-- data/abe.db is now schema v3; backup at data/abe.db.pre-track2-backup (delete once satisfied).
-- A stray `min-var-demo` config (config_id 2) + run 104 exist on the real db from runtime verification
-  (a valid min-variance config; delete its run then the config if unwanted).
-- Steps 26–28 landed as ONE cohesive frontend commit (router SPA must build atomically).
+- **dev repo is a parallel-session zone.** `dev/` is on branch `switchboard-offload-plan` (tip 1173d62, advanced past my registry commit 69b454a) with active worktrees (skill-iterate, switchboard-endpoint-launcher). This window left `dev.code-workspace` modified (observatory-sync regen, derived) + the registry launch-pointer commit 69b454a — DO NOT push the dev repo; leave it for that session.
+- `data/abe.db` is schema v3; backup at `data/abe.db.pre-track2-backup`. The `min-var-demo` config (config_id 2) is the non-central config the soak harness drives — keep it.
+- Backend/frontend/Chrome from the soak may still be running (:8140 / :5174).
+- README / CLAUDE.md / plan.md "Remaining (operator)" lines still list the Step 29 soak as pending — now stale (#35 done). A `/repo-update` after the UAT should sweep them.
 
 ## Key Files
-- Plan: docs/track2-scenario-engine-plan.md (Steps 16–30; 16–28 Status: DONE).
-- backend/abe/{migrations,config,registry,pipeline,scheduler,api}.py; backend/abe/blend/views.py;
-  backend/abe/optimize/{mvu,min_variance}.py; frontend/src/components/*.
+- `scripts/{launch-abe.ps1, soak.py, smoke.py}`; `docs/soak/track2-soak-2026-07-11.md`; `docs/track2-scenario-engine-plan.md` (Step 29 carries a `Harness:` line).
+- Backend: `backend/abe/{config,registry,pipeline,scheduler,api}.py`, `blend/views.py`, `optimize/{mvu,min_variance}.py`.
